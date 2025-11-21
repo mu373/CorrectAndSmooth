@@ -80,22 +80,22 @@ def community(data, post_fix):
     return result
 
 def spectral(data, post_fix):
-    from julia.api import Julia
-    jl = Julia(compiled_modules=False)
-    from julia import Main
-    Main.include("./norm_spec.jl")
+    from norm_spec import spectral_embedding
+
     print('Setting up spectral embedding')
     data.edge_index = to_undirected(data.edge_index)
-    np_edge_index = np.array(data.edge_index.T)
 
-    
     N = data.num_nodes
     row, col = data.edge_index
     adj = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
     adj = adj.to_scipy(layout='csr')
-    result = torch.tensor(Main.main(adj, 128)).float()
+
+    # Use pure Python spectral embedding
+    embedding = spectral_embedding(adj, k=128)
+    result = torch.tensor(embedding).float()
+
     torch.save(result, f'embeddings/spectral{post_fix}.pt')
-        
+
     return result
 
 

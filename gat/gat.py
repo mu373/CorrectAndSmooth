@@ -15,6 +15,7 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
 from outcome_correlation import prepare_folder
+from torch_geometric.utils import to_undirected, add_self_loops
 
 from models import GAT
 
@@ -76,10 +77,8 @@ def adjust_learning_rate(optimizer, lr, epoch):
             param_group["lr"] = lr * epoch / 50
 
 
-def train(model, graph, labels, train_idx, optimizer, use_labels):
+def train(model, edge_index, feat, labels, train_idx, optimizer, use_labels):
     model.train()
-
-    feat = graph.ndata["feat"]
 
     if use_labels:
         mask_rate = 0.5
@@ -96,7 +95,7 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
         train_pred_idx = train_idx[mask]
 
     optimizer.zero_grad()
-    pred = model(graph, feat)
+    pred = model(feat, edge_index)
     loss = cross_entropy(pred[train_pred_idx], labels[train_pred_idx])
     loss.backward()
     optimizer.step()
@@ -105,14 +104,12 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
 
 
 @th.no_grad()
-def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator):
+def evaluate(model, edge_index, feat, labels, train_idx, val_idx, test_idx, use_labels, evaluator):
     model.eval()
-
-    feat = graph.ndata["feat"]
 
     if use_labels:
         feat = add_labels(feat, labels, train_idx)
-    pred = model(graph, feat)
+    pred = model(feat, edge_index)
     train_loss = cross_entropy(pred[train_idx], labels[train_idx])
     val_loss = cross_entropy(pred[val_idx], labels[val_idx])
     test_loss = cross_entropy(pred[test_idx], labels[test_idx])
@@ -128,7 +125,7 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
     )
 
 
-def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running):
+def run(args, edge_index, feat, labels, train_idx, val_idx, test_idx, evaluator, n_running):
     # define model and optimizer
     model = gen_model(args)
     print(count_parameters(args))
@@ -149,11 +146,11 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
 
         adjust_learning_rate(optimizer, args.lr, epoch)
 
-        loss, pred = train(model, graph, labels, train_idx, optimizer, args.use_labels)
+        loss, pred = train(model, edge_index, feat, labels, train_idx, optimizer, args.use_labels)
         acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
-            model, graph, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
+            model, edge_index, feat, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
         )
 
         toc = time.time()
@@ -263,30 +260,40 @@ def main():
     train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
     graph, labels = data[0]
 
-    # add reverse edges
+    # Convert DGL graph to PyG format
+    print("Converting DGL graph to PyTorch Geometric format...")
+
+    # Extract edge_index from DGL graph
     srcs, dsts = graph.all_edges()
-    graph.add_edges(dsts, srcs)
+    edge_index = th.stack([srcs, dsts], dim=0)
 
-    # add self-loop
-    print(f"Total edges before adding self-loop {graph.number_of_edges()}")
-    graph = graph.remove_self_loop().add_self_loop()
-    print(f"Total edges after adding self-loop {graph.number_of_edges()}")
+    # Add reverse edges for undirected graph
+    edge_index = to_undirected(edge_index)
 
-    in_feats = graph.ndata["feat"].shape[1]
+    # Add self-loops
+    print(f"Total edges before adding self-loop {edge_index.size(1)}")
+    edge_index, _ = add_self_loops(edge_index, num_nodes=graph.number_of_nodes())
+    print(f"Total edges after adding self-loop {edge_index.size(1)}")
+
+    # Extract node features
+    feat = graph.ndata["feat"]
+
+    in_feats = feat.shape[1]
     n_classes = (labels.max() + 1).item()
-    # graph.create_format_()
 
+    # Move data to device
     train_idx = train_idx.to(device)
     val_idx = val_idx.to(device)
     test_idx = test_idx.to(device)
     labels = labels.to(device)
-    graph = graph.to(device)
+    feat = feat.to(device)
+    edge_index = edge_index.to(device)
 
     # run
     val_accs = []
     test_accs = []
     model_dir = f'../models/arxiv_gat'
-       
+
     if os.path.exists(model_dir):
         shutil.rmtree(model_dir)
     os.makedirs(model_dir)
@@ -294,7 +301,7 @@ def main():
         f.write(f'# of params: {sum(p.numel() for p in gen_model(args).parameters())}\n')
 
     for i in range(1, args.n_runs + 1):
-        val_acc, test_acc, out = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i)
+        val_acc, test_acc, out = run(args, edge_index, feat, labels, train_idx, val_idx, test_idx, evaluator, i)
         val_accs.append(val_acc)
         test_accs.append(test_acc)
         th.save(F.softmax(out, dim=1), f'{model_dir}/{i-1}.pt')

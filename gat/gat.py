@@ -13,9 +13,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
-from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
+from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
 from outcome_correlation import prepare_folder
-from torch_geometric.utils import to_undirected, add_self_loops
+import torch_geometric.transforms as T
 
 from models import GAT
 
@@ -253,30 +253,24 @@ def main():
         device = th.device("cuda:%d" % args.gpu)
 
     # load data
-    data = DglNodePropPredDataset(name="ogbn-arxiv")
+    dataset = PygNodePropPredDataset(name="ogbn-arxiv", transform=T.ToSparseTensor())
     evaluator = Evaluator(name="ogbn-arxiv")
 
-    splitted_idx = data.get_idx_split()
-    train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
-    graph, labels = data[0]
+    split_idx = dataset.get_idx_split()
+    train_idx, val_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
+    data = dataset[0]
 
-    # Convert DGL graph to PyG format
-    print("Converting DGL graph to PyTorch Geometric format...")
+    # Make graph undirected and add self-loops
+    data.adj_t = data.adj_t.to_symmetric()
 
-    # Extract edge_index from DGL graph
-    srcs, dsts = graph.all_edges()
-    edge_index = th.stack([srcs, dsts], dim=0)
+    # Convert sparse tensor to edge_index for GAT
+    edge_index = data.adj_t.coo()
+    edge_index = th.stack([edge_index[0], edge_index[1]], dim=0)
+    print(f"Total edges: {edge_index.size(1)}")
 
-    # Add reverse edges for undirected graph
-    edge_index = to_undirected(edge_index)
-
-    # Add self-loops
-    print(f"Total edges before adding self-loop {edge_index.size(1)}")
-    edge_index, _ = add_self_loops(edge_index, num_nodes=graph.number_of_nodes())
-    print(f"Total edges after adding self-loop {edge_index.size(1)}")
-
-    # Extract node features
-    feat = graph.ndata["feat"]
+    # Extract node features and labels
+    feat = data.x
+    labels = data.y
 
     in_feats = feat.shape[1]
     n_classes = (labels.max() + 1).item()

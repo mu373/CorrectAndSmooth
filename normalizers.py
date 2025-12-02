@@ -159,10 +159,82 @@ class PageRankNormalizer(BaseNormalizer):
         return f"pagerank_d{self.damping}"
 
 
+class DegreePageRankNormalizer(BaseNormalizer):
+    """
+    Combined Degree + PageRank normalization.
+
+    Adds degree and PageRank scores element-wise, then uses the sum as the weighting factor.
+    This combines local structure (degree) with global importance (PageRank).
+
+    Args:
+        alpha: Weight for degree (default 0.5). PageRank weight is (1 - alpha).
+        damping: PageRank damping factor (default 0.85)
+        max_iter: Maximum number of power iterations (default 100)
+        tol: Convergence tolerance (default 1e-6)
+    """
+
+    def __init__(self, alpha: float = 0.5, damping: float = 0.85, max_iter: int = 100, tol: float = 1e-6):
+        self.alpha = alpha
+        self.damping = damping
+        self.max_iter = max_iter
+        self.tol = tol
+
+    def compute_node_weights(self, adj: torch.sparse.Tensor) -> NormalizationResult:
+        N = adj.shape[0]
+        device = adj.device
+
+        # Compute degree
+        deg = torch.sparse.sum(adj, dim=1).to_dense().float()
+
+        # Compute PageRank via power iteration
+        deg_inv = safe_inverse(deg, power=-1.0)
+        indices = adj.indices()
+        row, col = indices[0], indices[1]
+        values = adj.values() * deg_inv[row]
+        P = torch.sparse_coo_tensor(indices, values, adj.shape, device=device).coalesce()
+
+        pr = torch.ones(N, device=device) / N
+        teleport = (1 - self.damping) / N
+
+        for _ in range(self.max_iter):
+            pr_old = pr.clone()
+            pr = teleport + self.damping * torch.sparse.mm(P.t(), pr.unsqueeze(1)).squeeze()
+            if (pr - pr_old).abs().max() < self.tol:
+                break
+
+        # Normalize degree and PageRank to same scale before combining
+        deg_normalized = deg / deg.max() if deg.max() > 0 else deg
+        pr_normalized = pr / pr.max() if pr.max() > 0 else pr
+
+        # Combine: alpha * degree + (1 - alpha) * pagerank
+        combined = self.alpha * deg_normalized + (1 - self.alpha) * pr_normalized
+
+        # Handle isolated nodes
+        nonzero_mask = combined > 0
+        if nonzero_mask.any() and (~nonzero_mask).any():
+            min_nonzero = combined[nonzero_mask].min()
+            combined[~nonzero_mask] = min_nonzero * 0.01
+
+        combined_inv = safe_inverse(combined, power=-1.0)
+        combined_inv_sqrt = safe_inverse(combined, power=-0.5)
+
+        return NormalizationResult(
+            left_norm=combined_inv,
+            right_norm=combined_inv,
+            symmetric_norm=combined_inv_sqrt,
+            metadata={'degree': deg, 'pagerank': pr, 'combined': combined}
+        )
+
+    @property
+    def name(self) -> str:
+        return f"degree_pagerank_a{self.alpha}_d{self.damping}"
+
+
 # Registry for easy lookup by name
 NORMALIZERS = {
     'degree': DegreeNormalizer,
     'pagerank': PageRankNormalizer,
+    'degree_pagerank': DegreePageRankNormalizer,
 }
 
 
@@ -171,7 +243,7 @@ def get_normalizer(name: str, **kwargs) -> BaseNormalizer:
     Get a normalizer by name.
 
     Args:
-        name: Name of the normalizer ('degree', 'pagerank')
+        name: Name of the normalizer ('degree', 'pagerank', 'degree_pagerank')
         **kwargs: Additional arguments for the normalizer
 
     Returns:

@@ -15,6 +15,11 @@ This directory contains OGB submissions. All hyperparameters were tuned on the v
 
 - In general, autoscale works more reliably than fixedscale, even though fixedscale may make more sense...
 
+## Setup
+```sh
+pip install -r requirement.txt
+```
+
 ## Arxiv
 
 ### Label Propagation (0 params):
@@ -54,7 +59,7 @@ Args []: 73.91 ± 0.15 -> 73.12 ± 0.12
 
 ### GAT + C&S (1567000 params, 73.56% base accuracy)
 ```
-cd gat && python gat.py --use-norm
+python gat/gat.py --use-norm
 cd .. && python run_experiments.py --dataset arxiv --method gat
 
 Valid acc -> Test acc

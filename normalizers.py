@@ -202,12 +202,15 @@ class DegreePageRankNormalizer(BaseNormalizer):
             if (pr - pr_old).abs().max() < self.tol:
                 break
 
-        # Normalize degree and PageRank to same scale before combining
-        deg_normalized = deg / deg.max() if deg.max() > 0 else deg
-        pr_normalized = pr / pr.max() if pr.max() > 0 else pr
+        # Normalize PageRank to same scale as degree
+        pr_scaled = pr / pr.max() * deg.max() if pr.max() > 0 else pr
 
-        # Combine: alpha * degree + (1 - alpha) * pagerank
-        combined = self.alpha * deg_normalized + (1 - self.alpha) * pr_normalized
+        # Combine: alpha * degree + (1 - alpha) * scaled_pagerank
+        combined = self.alpha * deg + (1 - self.alpha) * pr_scaled
+
+        # Debug: check correlation between degree and PageRank
+        correlation = torch.corrcoef(torch.stack([deg, pr_scaled]))[0, 1]
+        print(f"DegreePageRank: alpha={self.alpha}, deg/pr correlation={correlation:.4f}")
 
         # Handle isolated nodes
         nonzero_mask = combined > 0

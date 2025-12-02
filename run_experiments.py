@@ -28,6 +28,7 @@ def create_normalizer(args):
     elif args.normalizer == 'pagerank':
         return PageRankNormalizer(damping=args.pagerank_damping)
     elif args.normalizer == 'degree_pagerank':
+        print(f"Creating DegreePageRankNormalizer with alpha={args.degree_pagerank_alpha}, damping={args.pagerank_damping}")
         return DegreePageRankNormalizer(
             alpha=args.degree_pagerank_alpha,
             damping=args.pagerank_damping

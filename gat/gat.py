@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import gc
 import math
 import time
 import os
@@ -226,6 +227,11 @@ def count_parameters(args):
 
 def main():
     global device, in_feats, n_classes, epsilon
+
+    # Clear any existing GPU memory
+    gc.collect()
+    if th.cuda.is_available():
+        th.cuda.empty_cache()
 
     argparser = argparse.ArgumentParser("GAT on OGBN-Arxiv", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--cpu", action="store_true", help="CPU mode. This option overrides --gpu.")

@@ -18,6 +18,7 @@ This directory contains OGB submissions. All hyperparameters were tuned on the v
 ## Setup
 ```sh
 pip install -r requirement.txt
+# pip install -r requirement.lock
 ```
 
 ## Arxiv

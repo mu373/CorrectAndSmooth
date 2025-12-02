@@ -14,18 +14,83 @@ from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
 from logger import Logger
 import random
 from outcome_correlation import *
+from normalizers import DegreeNormalizer, PageRankNormalizer
+from adjacency import (
+    StandardAdjacency, TwoHopAdjacency, SignlessLaplacian,
+    Laplacian, KatzAdjacency
+)
+from cache import MatrixCache
+
+def create_normalizer(args):
+    """Create normalizer from CLI arguments."""
+    if args.normalizer == 'degree':
+        return DegreeNormalizer()
+    elif args.normalizer == 'pagerank':
+        return PageRankNormalizer(damping=args.pagerank_damping)
+    else:
+        raise ValueError(f"Unknown normalizer: {args.normalizer}")
+
+
+def create_adjacency(args):
+    """Create adjacency transformer from CLI arguments."""
+    if args.adjacency == 'standard':
+        return StandardAdjacency()
+    elif args.adjacency == '2hop':
+        return TwoHopAdjacency()
+    elif args.adjacency == 'signless_laplacian':
+        return SignlessLaplacian()
+    elif args.adjacency == 'laplacian':
+        return Laplacian()
+    elif args.adjacency == 'katz':
+        return KatzAdjacency(beta=args.katz_beta, k=args.katz_k)
+    else:
+        raise ValueError(f"Unknown adjacency type: {args.adjacency}")
+
 
 def main():
     parser = argparse.ArgumentParser(description='Outcome Correlations)')
     parser.add_argument('--dataset', type=str)
     parser.add_argument('--method', type=str)
+
+    # Node weighting (normalization)
+    parser.add_argument('--normalizer', type=str, default='degree',
+                        choices=['degree', 'pagerank'],
+                        help='Node weighting strategy (default: degree)')
+    parser.add_argument('--pagerank-damping', type=float, default=0.85,
+                        help='Damping factor for PageRank normalizer (default: 0.85)')
+
+    # Adjacency type
+    parser.add_argument('--adjacency', type=str, default='standard',
+                        choices=['standard', '2hop', 'signless_laplacian', 'laplacian', 'katz'],
+                        help='Adjacency matrix type (default: standard)')
+    parser.add_argument('--katz-beta', type=float, default=0.1,
+                        help='Beta decay factor for Katz adjacency (default: 0.1)')
+    parser.add_argument('--katz-k', type=int, default=3,
+                        help='Number of hops for Katz adjacency (default: 3)')
+
+    # Caching
+    parser.add_argument('--cache-dir', type=str, default=None,
+                        help='Directory for caching matrices (default: None, no caching)')
+
     args = parser.parse_args()
-    
+
+    # Create normalizer and adjacency transformer
+    normalizer = create_normalizer(args)
+    adjacency = create_adjacency(args)
+
+    # Create cache if specified
+    cache = MatrixCache(args.cache_dir) if args.cache_dir else None
+
+    print(f"Using normalizer: {normalizer.name}")
+    print(f"Using adjacency: {adjacency.name}")
+    if cache:
+        print(f"Using cache: {args.cache_dir}")
+
     dataset = PygNodePropPredDataset(name=f'ogbn-{args.dataset}')
     data = dataset[0]
-    
-    adj, D_isqrt = process_adj(data)
-    normalized_adjs = gen_normalized_adjs(adj, D_isqrt)
+
+    adj, norm_result = process_adj(data, normalizer=normalizer, adjacency=adjacency, cache=cache)
+    normalized_adjs = gen_normalized_adjs(adj, norm_result)
     DAD, DA, AD = normalized_adjs
     evaluator = Evaluator(name=f'ogbn-{args.dataset}')
     

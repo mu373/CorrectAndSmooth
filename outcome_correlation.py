@@ -21,6 +21,10 @@ import glob
 from collections.abc import Iterable
 import joblib
 
+from normalizers import DegreeNormalizer, NormalizationResult
+from adjacency import StandardAdjacency
+from cache import MatrixCache, get_cache
+
 
 def get_device():
     """Auto-detect the best available device for sparse operations."""
@@ -80,10 +84,40 @@ class SimpleLogger(object):
         if len(disp_args) > 1:
             print()
 
-def process_adj(data):
-    N = data.num_nodes
+def process_adj(data, normalizer=None, adjacency=None, cache=None):
+    """
+    Build adjacency matrix and compute normalization weights.
+
+    Args:
+        data: PyG data object
+        normalizer: BaseNormalizer instance (default: DegreeNormalizer)
+        adjacency: BaseAdjacency instance (default: StandardAdjacency)
+        cache: MatrixCache instance for caching results (default: None, no caching)
+
+    Returns:
+        adj: Transformed sparse adjacency matrix
+        norm_result: NormalizationResult with normalization vectors
+    """
+    if normalizer is None:
+        normalizer = DegreeNormalizer()
+    if adjacency is None:
+        adjacency = StandardAdjacency()
+
+    # Ensure edge_index is undirected before caching check
     data.edge_index = to_undirected(data.edge_index, data.num_nodes)
 
+    # Check cache first
+    if cache is not None:
+        cached = cache.get(
+            data.edge_index,
+            normalizer.name,
+            adjacency.name
+        )
+        if cached is not None:
+            print(f"Loaded from cache: {normalizer.name} + {adjacency.name}")
+            return cached
+
+    N = data.num_nodes
     row, col = data.edge_index
 
     # Create sparse COO tensor with ones as values
@@ -91,24 +125,60 @@ def process_adj(data):
     values = torch.ones(row.shape[0], dtype=torch.float)
     adj = torch.sparse_coo_tensor(indices, values, (N, N)).coalesce()
 
-    # Compute degree
-    deg = torch.sparse.sum(adj, dim=1).to_dense().to(torch.float)
-    deg_inv_sqrt = deg.pow(-0.5)
-    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-    return adj, deg_inv_sqrt
+    # Apply adjacency transformation (e.g., 2-hop, Laplacian)
+    adj = adjacency.transform(adj)
 
-def gen_normalized_adjs(adj, D_isqrt):
-    # For sparse @ dense, we need to scale the sparse tensor values
-    # DAD = D^{-1/2} A D^{-1/2}: scale each edge (i,j) by D_isqrt[i] * D_isqrt[j]
-    # DA = D^{-1} A: scale each edge (i,j) by D_isqrt[i]^2
-    # AD = A D^{-1}: scale each edge (i,j) by D_isqrt[j]^2
+    # Compute normalization weights
+    norm_result = normalizer.compute_node_weights(adj)
+
+    # Store in cache
+    if cache is not None:
+        cache.put(
+            data.edge_index,
+            normalizer.name,
+            adjacency.name,
+            (adj, norm_result)
+        )
+        print(f"Cached: {normalizer.name} + {adjacency.name}")
+
+    return adj, norm_result
+
+
+def gen_normalized_adjs(adj, norm_result):
+    """
+    Generate normalized adjacency matrices using normalization result.
+
+    Args:
+        adj: Sparse adjacency matrix
+        norm_result: NormalizationResult or D_isqrt tensor (for backward compatibility)
+
+    Returns:
+        DAD: Symmetric normalized (C^{-1/2} A C^{-1/2})
+        DA: Left normalized (C^{-1} A)
+        AD: Right normalized (A C^{-1})
+    """
     indices = adj.indices()
     row, col = indices[0], indices[1]
     values = adj.values()
 
-    DAD_values = values * D_isqrt[row] * D_isqrt[col]
-    DA_values = values * D_isqrt[row] * D_isqrt[row]
-    AD_values = values * D_isqrt[col] * D_isqrt[col]
+    # Support both new NormalizationResult and legacy D_isqrt tensor
+    if isinstance(norm_result, NormalizationResult):
+        symmetric_norm = norm_result.symmetric_norm
+        left_norm = norm_result.left_norm
+        right_norm = norm_result.right_norm
+    else:
+        # Legacy: norm_result is D_isqrt tensor
+        D_isqrt = norm_result
+        symmetric_norm = D_isqrt
+        left_norm = D_isqrt * D_isqrt  # D^{-1}
+        right_norm = D_isqrt * D_isqrt  # D^{-1}
+
+    # DAD = C^{-1/2} A C^{-1/2}: scale each edge (i,j) by symmetric_norm[i] * symmetric_norm[j]
+    DAD_values = values * symmetric_norm[row] * symmetric_norm[col]
+    # DA = C^{-1} A: scale each edge (i,j) by left_norm[i]
+    DA_values = values * left_norm[row]
+    # AD = A C^{-1}: scale each edge (i,j) by right_norm[j]
+    AD_values = values * right_norm[col]
 
     DAD = torch.sparse_coo_tensor(indices, DAD_values, adj.shape).coalesce()
     DA = torch.sparse_coo_tensor(indices, DA_values, adj.shape).coalesce()

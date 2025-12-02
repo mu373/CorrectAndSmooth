@@ -17,14 +17,26 @@ This directory contains OGB submissions. All hyperparameters were tuned on the v
 
 ## Setup
 
-## Paperspace gradient
+### Environments
+
+**Paperspace gradient**
 Setup a notebook inside Paperspace gradient with PyTorch 1.12 template.
 - Image (default): `paperspace/gradient-base:pt211-tf215-cudatk120-py311-20240202`
 
-## Installation
+**Runpod**
+- GPU: A40 (VRAM 48GB)
+- Template: Runpod Pytorch 2.8.0 (runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404)
+- https://console.runpod.io/deploy?gpu=A40&count=1&template=runpod-torch-v280
+
+
+### Installation
 ```sh
+# Install requirements
 pip install -r requirement.txt
 # pip install -r requirement.lock
+
+# For data loading
+export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
 ```
 
 ## Arxiv

@@ -29,8 +29,12 @@ Setup a notebook inside Paperspace gradient with PyTorch 1.12 template.
 - https://console.runpod.io/deploy?gpu=A40&count=1&template=runpod-torch-v280
 
 
-### Installation
+### Installation/Running
 ```sh
+git clone --branch pytorch https://github.com/mu373/CorrectAndSmooth.git
+cd CorrectAndSmooth
+mkdir -p embeddings
+
 # Install requirements
 pip install -r requirement.txt
 # pip install -r requirement.lock

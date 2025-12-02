@@ -122,8 +122,8 @@ def process_adj(data, normalizer=None, adjacency=None, cache=None):
 
     # Create sparse COO tensor with ones as values
     indices = torch.stack([row, col], dim=0)
-    values = torch.ones(row.shape[0], dtype=torch.float)
-    adj = torch.sparse_coo_tensor(indices, values, (N, N)).coalesce()
+    values = torch.ones(row.shape[0], dtype=torch.float, device=row.device)
+    adj = torch.sparse_coo_tensor(indices, values, (N, N), device=row.device).coalesce()
 
     # Apply adjacency transformation (e.g., 2-hop, Laplacian)
     adj = adjacency.transform(adj)

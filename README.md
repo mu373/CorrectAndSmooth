@@ -36,8 +36,8 @@ cd CorrectAndSmooth
 mkdir -p embeddings
 
 # Install requirements
-pip install -r requirement.txt
-# pip install -r requirement.lock
+pip install -r requirements.txt
+# pip install -r requirements.lock
 
 # For data loading
 export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1

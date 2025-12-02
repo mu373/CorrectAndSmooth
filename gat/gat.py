@@ -15,7 +15,7 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
 from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
 from outcome_correlation import prepare_folder
-import torch_geometric.transforms as T
+from torch_geometric.utils import to_undirected
 
 from models import GAT
 
@@ -249,23 +249,21 @@ def main():
 
     if args.cpu:
         device = th.device("cpu")
-    else:
+    elif th.cuda.is_available():
         device = th.device("cuda:%d" % args.gpu)
+    else:
+        device = th.device("cpu")
 
     # load data
-    dataset = PygNodePropPredDataset(name="ogbn-arxiv", transform=T.ToSparseTensor())
+    dataset = PygNodePropPredDataset(name="ogbn-arxiv")
     evaluator = Evaluator(name="ogbn-arxiv")
 
     split_idx = dataset.get_idx_split()
     train_idx, val_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
     data = dataset[0]
 
-    # Make graph undirected and add self-loops
-    data.adj_t = data.adj_t.to_symmetric()
-
-    # Convert sparse tensor to edge_index for GAT
-    edge_index = data.adj_t.coo()
-    edge_index = th.stack([edge_index[0], edge_index[1]], dim=0)
+    # Make graph undirected using to_undirected
+    edge_index = to_undirected(data.edge_index, num_nodes=data.num_nodes)
     print(f"Total edges: {edge_index.size(1)}")
 
     # Extract node features and labels

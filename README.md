@@ -79,7 +79,7 @@ Args []: 73.91 ± 0.15 -> 73.12 ± 0.12
 ### GAT + C&S (1567000 params, 73.56% base accuracy)
 ```
 python gat/gat.py --use-norm
-cd .. && python run_experiments.py --dataset arxiv --method gat
+python run_experiments.py --dataset arxiv --method gat
 
 Valid acc -> Test acc
 Args []: 74.84 ± 0.07 -> 73.86 ± 0.14

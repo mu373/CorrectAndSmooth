@@ -14,7 +14,7 @@ from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
 from logger import Logger
 import random
 from outcome_correlation import *
-from normalizers import DegreeNormalizer, PageRankNormalizer
+from normalizers import DegreeNormalizer, PageRankNormalizer, DegreePageRankNormalizer
 from adjacency import (
     StandardAdjacency, TwoHopAdjacency, SignlessLaplacian,
     Laplacian, KatzAdjacency
@@ -27,6 +27,11 @@ def create_normalizer(args):
         return DegreeNormalizer()
     elif args.normalizer == 'pagerank':
         return PageRankNormalizer(damping=args.pagerank_damping)
+    elif args.normalizer == 'degree_pagerank':
+        return DegreePageRankNormalizer(
+            alpha=args.degree_pagerank_alpha,
+            damping=args.pagerank_damping
+        )
     else:
         raise ValueError(f"Unknown normalizer: {args.normalizer}")
 
@@ -54,10 +59,12 @@ def main():
 
     # Node weighting (normalization)
     parser.add_argument('--normalizer', type=str, default='degree',
-                        choices=['degree', 'pagerank'],
+                        choices=['degree', 'pagerank', 'degree_pagerank'],
                         help='Node weighting strategy (default: degree)')
     parser.add_argument('--pagerank-damping', type=float, default=0.85,
                         help='Damping factor for PageRank normalizer (default: 0.85)')
+    parser.add_argument('--degree-pagerank-alpha', type=float, default=0.5,
+                        help='Weight for degree in degree_pagerank normalizer (default: 0.5)')
 
     # Adjacency type
     parser.add_argument('--adjacency', type=str, default='standard',

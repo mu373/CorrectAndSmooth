@@ -9,7 +9,6 @@ import glob
 
 
 from copy import deepcopy
-from torch_sparse import SparseTensor
 from torch_geometric.utils import to_undirected
 import numpy as np
 from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
@@ -22,6 +21,13 @@ import glob
 from collections.abc import Iterable
 import joblib
 
+
+def get_device():
+    """Auto-detect the best available device for sparse operations."""
+    if torch.cuda.is_available():
+        return 'cuda'
+    # Note: MPS doesn't support sparse matrix operations yet, so we fall back to CPU
+    return 'cpu'
 
 
 class SimpleLogger(object):
@@ -80,25 +86,46 @@ def process_adj(data):
 
     row, col = data.edge_index
 
-    adj = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
-    deg = adj.sum(dim=1).to(torch.float)
+    # Create sparse COO tensor with ones as values
+    indices = torch.stack([row, col], dim=0)
+    values = torch.ones(row.shape[0], dtype=torch.float)
+    adj = torch.sparse_coo_tensor(indices, values, (N, N)).coalesce()
+
+    # Compute degree
+    deg = torch.sparse.sum(adj, dim=1).to_dense().to(torch.float)
     deg_inv_sqrt = deg.pow(-0.5)
     deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
     return adj, deg_inv_sqrt
 
 def gen_normalized_adjs(adj, D_isqrt):
-    DAD = D_isqrt.view(-1,1)*adj*D_isqrt.view(1,-1)
-    DA = D_isqrt.view(-1,1) * D_isqrt.view(-1,1)*adj
-    AD = adj*D_isqrt.view(1,-1) * D_isqrt.view(1,-1)
+    # For sparse @ dense, we need to scale the sparse tensor values
+    # DAD = D^{-1/2} A D^{-1/2}: scale each edge (i,j) by D_isqrt[i] * D_isqrt[j]
+    # DA = D^{-1} A: scale each edge (i,j) by D_isqrt[i]^2
+    # AD = A D^{-1}: scale each edge (i,j) by D_isqrt[j]^2
+    indices = adj.indices()
+    row, col = indices[0], indices[1]
+    values = adj.values()
+
+    DAD_values = values * D_isqrt[row] * D_isqrt[col]
+    DA_values = values * D_isqrt[row] * D_isqrt[row]
+    AD_values = values * D_isqrt[col] * D_isqrt[col]
+
+    DAD = torch.sparse_coo_tensor(indices, DAD_values, adj.shape).coalesce()
+    DA = torch.sparse_coo_tensor(indices, DA_values, adj.shape).coalesce()
+    AD = torch.sparse_coo_tensor(indices, AD_values, adj.shape).coalesce()
     return DAD, DA, AD
 
 def gen_normalized_adj(adj, pw): # pw = 0 is D^-1A, pw=1 is AD^-1
-    deg = adj.sum(dim=1).to(torch.float)
-    front  = deg.pow(-(1-pw))
+    deg = torch.sparse.sum(adj, dim=1).to_dense().to(torch.float)
+    front = deg.pow(-(1-pw))
     front[front == float('inf')] = 0
-    back  = deg.pow(-(pw))
+    back = deg.pow(-pw)
     back[back == float('inf')] = 0
-    return (front.view(-1,1)*adj*back.view(1,-1))
+
+    indices = adj.indices()
+    row, col = indices[0], indices[1]
+    values = adj.values() * front[row] * back[col]
+    return torch.sparse_coo_tensor(indices, values, adj.shape).coalesce()
 
 def model_load(file, device='cpu'):
     result = torch.load(file, map_location='cpu')
@@ -157,8 +184,10 @@ def pre_outcome_correlation(labels, model_out, label_idx):
     
     return y
 
-def general_outcome_correlation(adj, y, alpha, num_propagations, post_step, alpha_term, device='cuda', display=True):
+def general_outcome_correlation(adj, y, alpha, num_propagations, post_step, alpha_term, device=None, display=True):
     """general outcome correlation. alpha_term = True for outcome correlation, alpha_term = False for residual correlation"""
+    if device is None:
+        device = get_device()
     adj = adj.to(device)
     orig_device = y.device
     y = y.to(device)
@@ -183,7 +212,7 @@ def label_propagation(data, split_idx, A, alpha, num_propagations, idxs):
 
     return general_outcome_correlation(A, y, alpha, num_propagations, post_step=lambda x:torch.clamp(x,0,1), alpha_term=True)
 
-def double_correlation_autoscale(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, scale=1.0, train_only=False, device='cuda', display=True):
+def double_correlation_autoscale(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, scale=1.0, train_only=False, device=None, display=True):
     train_idx, valid_idx, test_idx = split_idx
     if train_only:
         label_idx = torch.cat([split_idx['train']])
@@ -208,7 +237,7 @@ def double_correlation_autoscale(data, model_out, split_idx, A1, alpha1, num_pro
     
     return res_result, result
 
-def double_correlation_fixed(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, scale=1.0, train_only=False, device='cuda', display=True):
+def double_correlation_fixed(data, model_out, split_idx, A1, alpha1, num_propagations1, A2, alpha2, num_propagations2, scale=1.0, train_only=False, device=None, display=True):
     train_idx, valid_idx, test_idx = split_idx
     if train_only:
         label_idx = torch.cat([split_idx['train']])
@@ -236,7 +265,7 @@ def double_correlation_fixed(data, model_out, split_idx, A1, alpha1, num_propaga
     return res_result, result
 
 
-def only_outcome_correlation(data, model_out, split_idx, A, alpha, num_propagations, labels, device='cuda', display=True):
+def only_outcome_correlation(data, model_out, split_idx, A, alpha, num_propagations, labels, device=None, display=True):
     res_result = model_out.clone()
     label_idxs = get_labels_from_name(labels, split_idx)
     y = pre_outcome_correlation(labels=data.y.data, model_out=model_out, label_idx=label_idxs)

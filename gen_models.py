@@ -7,9 +7,7 @@ from tqdm import tqdm
 
 
 from copy import deepcopy
-import torch_geometric.transforms as T
 from torch_geometric.nn import GCNConv, SAGEConv
-from torch_sparse import SparseTensor
 from torch_geometric.utils import to_undirected
 import numpy as np
 
@@ -131,10 +129,9 @@ def main():
     device = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
     device = torch.device(device)
 
-    dataset = PygNodePropPredDataset(name=f'ogbn-{args.dataset}',transform=T.ToSparseTensor())
-    
+    dataset = PygNodePropPredDataset(name=f'ogbn-{args.dataset}')
+
     data = dataset[0]
-    data.adj_t = data.adj_t.to_symmetric()
     
     x = data.x
 

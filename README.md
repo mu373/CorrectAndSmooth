@@ -16,6 +16,12 @@ This directory contains OGB submissions. All hyperparameters were tuned on the v
 - In general, autoscale works more reliably than fixedscale, even though fixedscale may make more sense...
 
 ## Setup
+
+## Paperspace gradient
+Setup a notebook inside Paperspace gradient with PyTorch 1.12 template.
+- Image (default): `paperspace/gradient-base:pt211-tf215-cudatk120-py311-20240202`
+
+## Installation
 ```sh
 pip install -r requirement.txt
 # pip install -r requirement.lock

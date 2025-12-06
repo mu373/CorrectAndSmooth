@@ -80,6 +80,11 @@ def main():
     parser.add_argument('--cache-dir', type=str, default=None,
                         help='Directory for caching matrices (default: None, no caching)')
 
+    # Normalization style
+    parser.add_argument('--norm-style', type=str, default='symmetric',
+                        choices=['symmetric', 'left', 'right'],
+                        help='Normalization style: symmetric (D^{-1/2} A D^{-1/2}), left (D^{-1/2} A), right (A D^{-1/2})')
+
     args = parser.parse_args()
 
     # Create normalizer and adjacency transformer
@@ -91,6 +96,7 @@ def main():
 
     print(f"Using normalizer: {normalizer.name}")
     print(f"Using adjacency: {adjacency.name}")
+    print(f"Using norm-style: {args.norm_style}")
     if cache:
         print(f"Using cache: {args.cache_dir}")
 
@@ -98,8 +104,9 @@ def main():
     data = dataset[0]
 
     adj, norm_result = process_adj(data, normalizer=normalizer, adjacency=adjacency, cache=cache)
-    normalized_adjs = gen_normalized_adjs(adj, norm_result)
-    DAD, DA, AD = normalized_adjs
+
+    # Generate matrix with the specified normalization style
+    A_styled = gen_normalized_adj_by_style(adj, norm_result, style=args.norm_style)
     evaluator = Evaluator(name=f'ogbn-{args.dataset}')
     
     split_idx = dataset.get_idx_split()
@@ -112,37 +119,37 @@ def main():
             'idxs': ['train'],
             'alpha': 0.9,
             'num_propagations': 50,
-            'A': AD,
+            'A': A_styled,
         }
         plain_dict = {
             'train_only': True,
             'alpha1': 0.87,
-            'A1': AD,
+            'A1': A_styled,
             'num_propagations1': 50,
             'alpha2': 0.81,
-            'A2': DAD,
+            'A2': A_styled,
             'num_propagations2': 50,
             'display': False,
         }
         plain_fn = double_correlation_autoscale
-        
+
         """
         If you tune hyperparameters on test set
-        {'alpha1': 0.9988673963255859, 'alpha2': 0.7942279952481052, 'A1': 'DA', 'A2': 'AD'} 
+        {'alpha1': 0.9988673963255859, 'alpha2': 0.7942279952481052, 'A1': 'DA', 'A2': 'AD'}
         gets you to 72.64
         """
         linear_dict = {
             'train_only': True,
-            'alpha1': 0.98, 
-            'alpha2': 0.65, 
-            'A1': AD, 
-            'A2': DAD,
+            'alpha1': 0.98,
+            'alpha2': 0.65,
+            'A1': A_styled,
+            'A2': A_styled,
             'num_propagations1': 50,
             'num_propagations2': 50,
             'display': False,
         }
         linear_fn = double_correlation_autoscale
-        
+
         """
         If you tune hyperparameters on test set
         {'alpha1': 0.9956668128133523, 'alpha2': 0.8542393515434346, 'A1': 'DA', 'A2': 'AD'}
@@ -150,65 +157,65 @@ def main():
         """
         mlp_dict = {
             'train_only': True,
-            'alpha1': 0.9791632871592579, 
-            'alpha2': 0.7564990804200602, 
-            'A1': DA, 
-            'A2': AD,
+            'alpha1': 0.9791632871592579,
+            'alpha2': 0.7564990804200602,
+            'A1': A_styled,
+            'A2': A_styled,
             'num_propagations1': 50,
             'num_propagations2': 50,
             'display': False,
         }
-        mlp_fn = double_correlation_autoscale  
-        
+        mlp_fn = double_correlation_autoscale
+
         gat_dict = {
             'labels': ['train'],
-            'alpha': 0.8, 
-            'A': DAD,
+            'alpha': 0.8,
+            'A': A_styled,
             'num_propagations': 50,
             'display': False,
         }
         gat_fn = only_outcome_correlation
 
-        
+
     elif args.dataset == 'products':
         lp_dict = {
             'idxs': ['train'],
             'alpha': 0.5,
             'num_propagations': 50,
-            'A': DAD,
+            'A': A_styled,
         }
-        
+
         plain_dict = {
             'train_only': True,
             'alpha1': 1.0,
-            'alpha2': 0.9, 
-            'scale': 20.0, 
-            'A1': DAD, 
-            'A2': DAD,
+            'alpha2': 0.9,
+            'scale': 20.0,
+            'A1': A_styled,
+            'A2': A_styled,
             'num_propagations1': 50,
             'num_propagations2': 50,
         }
         plain_fn = double_correlation_fixed
-        
+
         linear_dict = {
             'train_only': True,
             'alpha1': 1.0,
-            'alpha2': 0.9, 
-            'scale': 20.0, 
-            'A1': DAD, 
-            'A2': DAD,
+            'alpha2': 0.9,
+            'scale': 20.0,
+            'A1': A_styled,
+            'A2': A_styled,
             'num_propagations1': 50,
             'num_propagations2': 50,
         }
         linear_fn = double_correlation_fixed
-        
+
         mlp_dict = {
             'train_only': True,
             'alpha1': 1.0,
-            'alpha2': 0.8, 
-            'scale': 10.0, 
-            'A1': DAD, 
-            'A2': DA,
+            'alpha2': 0.8,
+            'scale': 10.0,
+            'A1': A_styled,
+            'A2': A_styled,
             'num_propagations1': 50,
             'num_propagations2': 50,
         }

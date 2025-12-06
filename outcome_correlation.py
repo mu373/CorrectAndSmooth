@@ -144,6 +144,47 @@ def process_adj(data, normalizer=None, adjacency=None, cache=None):
     return adj, norm_result
 
 
+def gen_normalized_adj_by_style(adj, norm_result, style='symmetric'):
+    """
+    Generate a single normalized adjacency matrix.
+
+    Args:
+        adj: Sparse adjacency matrix
+        norm_result: NormalizationResult or D_isqrt tensor (for backward compatibility)
+        style: Normalization style:
+            - 'symmetric': D^{-1/2} A D^{-1/2}
+            - 'left': D^{-1/2} A
+            - 'right': A D^{-1/2}
+
+    Returns:
+        Normalized sparse adjacency matrix
+    """
+    indices = adj.indices()
+    row, col = indices[0], indices[1]
+    values = adj.values()
+
+    # Support both new NormalizationResult and legacy D_isqrt tensor
+    if isinstance(norm_result, NormalizationResult):
+        symmetric_norm = norm_result.symmetric_norm
+    else:
+        # Legacy: norm_result is D_isqrt tensor
+        symmetric_norm = norm_result
+
+    if style == 'symmetric':
+        # D^{-1/2} A D^{-1/2}: scale each edge (i,j) by symmetric_norm[i] * symmetric_norm[j]
+        new_values = values * symmetric_norm[row] * symmetric_norm[col]
+    elif style == 'left':
+        # D^{-1/2} A: scale each edge (i,j) by symmetric_norm[i]
+        new_values = values * symmetric_norm[row]
+    elif style == 'right':
+        # A D^{-1/2}: scale each edge (i,j) by symmetric_norm[j]
+        new_values = values * symmetric_norm[col]
+    else:
+        raise ValueError(f"Unknown normalization style: {style}. Use 'symmetric', 'left', or 'right'.")
+
+    return torch.sparse_coo_tensor(indices, new_values, adj.shape).coalesce()
+
+
 def gen_normalized_adjs(adj, norm_result):
     """
     Generate normalized adjacency matrices using normalization result.

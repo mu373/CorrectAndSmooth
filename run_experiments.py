@@ -6,6 +6,7 @@ from custom_dataset import CustomDataset, get_prefix
 from custom_evaluator import CustomEvaluator
 from custom_presets import get_preset, get_fn_name
 from outcome_correlation import *
+from results_logger import save_run_experiments_result
 from normalizers import DegreeNormalizer, PageRankNormalizer, DegreePageRankNormalizer
 from adjacency import (
     StandardAdjacency,
@@ -354,22 +355,35 @@ def main():
         print("Test acc:", eval_test(out, split_idx["test"]))
         return
 
-    get_orig_acc(data, eval_test, model_outs, split_idx)
-    while True:
-        if args.method == "plain":
-            evaluate_params(
-                data, eval_test, model_outs, split_idx, plain_dict, fn=plain_fn
-            )
-        elif args.method == "linear":
-            evaluate_params(
-                data, eval_test, model_outs, split_idx, linear_dict, fn=linear_fn
-            )
-        elif args.method == "mlp":
-            evaluate_params(data, eval_test, model_outs, split_idx, mlp_dict, fn=mlp_fn)
-        elif args.method == "gat":
-            evaluate_params(data, eval_test, model_outs, split_idx, gat_dict, fn=gat_fn)
-        #         import pdb; pdb.set_trace()
-        break
+    orig_results = get_orig_acc(data, eval_test, model_outs, split_idx)
+
+    # Get C&S results
+    if args.method == "plain":
+        _, cs_results = evaluate_params(
+            data, eval_test, model_outs, split_idx, plain_dict, fn=plain_fn
+        )
+    elif args.method == "linear":
+        _, cs_results = evaluate_params(
+            data, eval_test, model_outs, split_idx, linear_dict, fn=linear_fn
+        )
+    elif args.method == "mlp":
+        _, cs_results = evaluate_params(
+            data, eval_test, model_outs, split_idx, mlp_dict, fn=mlp_fn
+        )
+    elif args.method == "gat":
+        _, cs_results = evaluate_params(
+            data, eval_test, model_outs, split_idx, gat_dict, fn=gat_fn
+        )
+
+    # Save results to CSV
+    dataname = args.dataname if args.dataset == "custom" else args.dataset
+    # Match orig and cs results by run number
+    orig_by_run = {r[0]: (r[1], r[2]) for r in orig_results}
+    for run, cs_valid, cs_test in cs_results:
+        orig_valid, orig_test = orig_by_run.get(run, (0, 0))
+        save_run_experiments_result(
+            dataname, args, run, orig_valid, orig_test, cs_valid, cs_test
+        )
 
 
 #     name = f'{args.experiment}_{args.search_type}_{args.model_dir}'

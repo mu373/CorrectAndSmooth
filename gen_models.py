@@ -11,6 +11,7 @@ from diffusion_feature import preprocess
 from logger import Logger
 from custom_dataset import CustomDataset, preprocess_custom, get_prefix
 from custom_evaluator import CustomEvaluator
+from results_logger import save_gen_models_result
 
 
 class MLP(torch.nn.Module):
@@ -169,7 +170,9 @@ def main():
                     dim=-1,
                 )
             elif args.dataset == "products":
-                embeddings = preprocess(preprocess_data, "spectral", post_fix=args.dataset)
+                embeddings = preprocess(
+                    preprocess_data, "spectral", post_fix=args.dataset
+                )
             x = torch.cat([x, embeddings], dim=-1)
 
     # Feature standardization (only for arxiv)
@@ -214,6 +217,8 @@ def main():
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
         best_valid = 0
         best_out = None
+        best_train = 0
+        best_test = 0
         for epoch in range(1, args.epochs):
             loss = train(model, x, y_true, train_idx, optimizer)
             result, out = test(model, x, y_true, split_idx, evaluator)
@@ -221,6 +226,8 @@ def main():
             if valid_acc > best_valid:
                 best_valid = valid_acc
                 best_out = out.cpu().exp()
+                best_train = train_acc
+                best_test = test_acc
 
             print(
                 f"Run: {run + 1:02d}, "
@@ -234,6 +241,10 @@ def main():
 
         logger.print_statistics(run)
         torch.save(best_out, f"{model_dir}/{run}.pt")
+
+        # Save results to CSV
+        dataname = args.dataname if args.dataset == "custom" else args.dataset
+        save_gen_models_result(dataname, args, run, best_train, best_valid, best_test)
 
     logger.print_statistics()
 

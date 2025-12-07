@@ -113,6 +113,22 @@ Prefix is extracted from dataname: `ba001` → `ba`, `ws001` → `ws`.
 ### Output Paths
 - Models: `models/{prefix}/{dataname}-{model}/`
 - Embeddings: `embeddings/{prefix}/{dataname}-spectral.pt`
+- Results: `results/gen_models.csv`, `results/run_experiments.csv`
+
+### Results CSV Format
+One row per run, appended across experiments.
+
+**gen_models.csv** (base model training):
+```
+dataname,model,epochs,hidden_channels,use_embeddings,run,train,valid,test
+ba001,mlp,300,256,True,0,0.923,0.861,0.840
+```
+
+**run_experiments.csv** (C&S post-processing):
+```
+dataname,method,normalizer,adjacency,norm_style,run,orig_valid,orig_test,cs_valid,cs_test
+ba001,mlp,degree,standard,symmetric,0,0.861,0.840,0.883,0.869
+```
 
 ### Example
 ```bash

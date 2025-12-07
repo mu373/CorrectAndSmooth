@@ -92,6 +92,40 @@ Args []: 74.84 ± 0.07 -> 73.86 ± 0.14
 ### Notes
 As opposed to the paper's results, which only use spectral embeddings, here we use spectral *and* diffusion embeddings, which we find improves Arxiv performance.
 
+## Custom Datasets
+
+You can run C&S on custom graph data using `--dataset custom --dataname <name>`.
+
+### Data Format
+```
+dataset/{prefix}/{dataname}/
+├── edge.csv(.gz)       # source,target pairs (no header)
+├── node-feat.csv(.gz)  # node features, comma-separated
+├── node-label.csv(.gz) # one integer label per line
+└── split/              # optional (auto-generated 60/20/20 if missing)
+    ├── train.csv(.gz)
+    ├── valid.csv(.gz)
+    └── test.csv(.gz)
+```
+
+Prefix is extracted from dataname: `ba001` → `ba`, `ws001` → `ws`.
+
+### Output Paths
+- Models: `models/{prefix}/{dataname}-{model}/`
+- Embeddings: `embeddings/{prefix}/{dataname}-spectral.pt`
+
+### Example
+```bash
+# Train MLP
+python gen_models.py --dataset custom --dataname ba001 --model mlp --epochs 300
+
+# With spectral embeddings
+python gen_models.py --dataset custom --dataname ba001 --model mlp --epochs 300 --use_embeddings
+
+# Run C&S
+python run_experiments.py --dataset custom --dataname ba001 --method mlp
+```
+
 ## Products
 
 ### Label Propagation (0 params):

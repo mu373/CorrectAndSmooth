@@ -137,37 +137,37 @@ def get_next_name(base_dir="dataset/ba"):
     return f"ba{max_num + 1:03d}"
 
 
-def save_to_ogb_format(G, labels, features, output_dir):
+def save_to_ogb_format(G, labels, features, output_dir, verbose=True):
     """Save graph in OGB raw format"""
     os.makedirs(output_dir, exist_ok=True)
 
     # edge.csv.gz
+    if verbose:
+        print("      Saving edge.csv.gz...")
     edges = list(G.edges())
     with gzip.open(os.path.join(output_dir, "edge.csv.gz"), "wt") as f:
         for src, dst in edges:
             f.write(f"{src},{dst}\n")
 
     # node-feat.csv.gz
+    if verbose:
+        print("      Saving node-feat.csv.gz...")
     with gzip.open(os.path.join(output_dir, "node-feat.csv.gz"), "wt") as f:
         for row in features:
             f.write(",".join(map(str, row)) + "\n")
 
     # node-label.csv.gz
+    if verbose:
+        print("      Saving node-label.csv.gz...")
     with gzip.open(os.path.join(output_dir, "node-label.csv.gz"), "wt") as f:
         for label in labels:
             f.write(f"{label}\n")
 
-    # # num-node-list.csv.gz
-    # with gzip.open(os.path.join(output_dir, "num-node-list.csv.gz"), "wt") as f:
-    #     f.write(f"{G.number_of_nodes()}\n")
 
-    # # num-edge-list.csv.gz
-    # with gzip.open(os.path.join(output_dir, "num-edge-list.csv.gz"), "wt") as f:
-    #     f.write(f"{G.number_of_edges()}\n")
-
-
-def save_metadata(metadata, output_dir):
+def save_metadata(metadata, output_dir, verbose=True):
     """Save metadata to JSON file"""
+    if verbose:
+        print("      Saving metadata.json...")
     with open(os.path.join(output_dir, "metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)
 

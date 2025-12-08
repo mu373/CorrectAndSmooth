@@ -25,11 +25,10 @@ Usage (Python):
 
 Output:
     dataset/ba/{name}/
-        raw/
-            edge.csv.gz       # source,target pairs
-            node-feat.csv.gz  # node features (dim_features columns)
-            node-label.csv.gz # node labels
-        metadata.json         # all parameters + results
+        edge.csv.gz       # source,target pairs
+        node-feat.csv.gz  # node features (dim_features columns)
+        node-label.csv.gz # node labels
+        metadata.json     # all parameters + results
 """
 
 import networkx as nx
@@ -138,9 +137,7 @@ def save_to_ogb_format(G, labels, features, output_dir):
 
 def save_metadata(metadata, output_dir):
     """Save metadata to JSON file"""
-    # Save to parent dir (dataset/ba/{name}/) not raw/
-    parent_dir = os.path.dirname(output_dir)
-    with open(os.path.join(parent_dir, "metadata.json"), "w") as f:
+    with open(os.path.join(output_dir, "metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2)
 
 
@@ -155,7 +152,7 @@ def generate_ba_dataset(
     sigma=1.0,
     seed=42,
 ):
-    """Generate BA graph dataset and save to dataset/ba/{name}/raw/
+    """Generate BA graph dataset and save to dataset/ba/{name}/
 
     Args:
         name: Dataset name. If None, auto-increment (ba001, ba002, ...)
@@ -169,7 +166,7 @@ def generate_ba_dataset(
         seed: Random seed
 
     Returns:
-        output_dir: Path to the raw data directory
+        output_dir: Path to the data directory
     """
     # Auto-increment name if not provided
     if name is None:
@@ -189,8 +186,8 @@ def generate_ba_dataset(
     # Generate features
     features = generate_features(labels, dim_features, sigma)
 
-    # Save to dataset/ba/{name}/raw/
-    output_dir = f"dataset/ba/{name}/raw"
+    # Save to dataset/ba/{name}/
+    output_dir = f"dataset/ba/{name}"
     save_to_ogb_format(G, labels, features, output_dir)
 
     # Save metadata

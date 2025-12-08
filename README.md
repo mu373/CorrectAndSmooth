@@ -162,6 +162,17 @@ python gen_models.py --dataset custom --model mlp --epochs 300 --dataname ws001
 python run_experiments.py --dataset custom --method mlp --dataname ws001
 ```
 
+## Aggregating Metadata
+
+Combine metadata.json files from multiple datasets into a single CSV for analysis:
+
+```bash
+python aggregate_dataset_metadata.py --datatype ba
+python aggregate_dataset_metadata.py --datatype ws
+```
+
+Output: `{datatype}_metadata.csv` containing graph properties (n_nodes, n_edges, avg_clustering, centrality metrics, etc.) for all datasets of that type.
+
 ## Products
 
 ### Label Propagation (0 params):

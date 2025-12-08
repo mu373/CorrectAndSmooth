@@ -144,7 +144,7 @@ python run_experiments.py --dataset custom --dataname ba001 --method mlp
 
 ## BA
 
-Evaluate the effect of hubs in the dataset.
+Evaluate the effect of hubs in the dataset. Vary `m` to control degree heterogeneity (hubbiness).
 
 ```bash
 python generate_synthetic_graph_ba.py --n_nodes 10000 --labeling louvain --n_classes 40 --sigma 5 --m 1
@@ -154,7 +154,7 @@ python run_experiments.py --dataset custom --method mlp --dataname ba001
 
 ## WS
 
-Evaluate small-world rewiring and contiguous ring sectors.
+Evaluate small-world rewiring and contiguous ring sectors. Vary `p` to control clustering coefficient.
 
 ```bash
 python generate_synthetic_graph_ws.py --n_nodes 10000 --k 10 --p 0.1 --labeling equal --n_classes 40 --feature_noise_sigma 5

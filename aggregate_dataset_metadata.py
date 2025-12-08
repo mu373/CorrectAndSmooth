@@ -1,9 +1,14 @@
-"""Aggregate metadata files from synthetic graph datasets and export to CSV.
+"""Aggregate metadata.json files from synthetic graph datasets into a single CSV.
+
+Scans dataset/{datatype}/**/metadata.json and combines them into one CSV file
+for analysis. Useful for comparing graph properties across experiments.
 
 Usage:
-    python aggregate_metadata.py --datatype ba
-    python aggregate_metadata.py --datatype ba --output results.csv
-    python aggregate_metadata.py --datatype ba -o custom_output.csv
+    python aggregate_dataset_metadata.py --datatype ba
+    python aggregate_dataset_metadata.py --datatype ws -o ws_metadata.csv
+
+Output:
+    {datatype}_metadata.csv (or custom path with -o)
 """
 
 import argparse

@@ -142,6 +142,16 @@ python gen_models.py --dataset custom --dataname ba001 --model mlp --epochs 300 
 python run_experiments.py --dataset custom --dataname ba001 --method mlp
 ```
 
+## BA
+
+Evaluate the effect of hubs in the dataset.
+
+```bash
+python generate_synthetic_graph_ba.py --n_nodes 10000 --labeling louvain --n_classes 40 --sigma 5 --m 1
+python gen_models.py --dataset custom --model mlp --epochs 300 --dataname ba001
+python run_experiments.py --dataset custom --method mlp --dataname ba001
+```
+
 ## Products
 
 ### Label Propagation (0 params):

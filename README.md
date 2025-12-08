@@ -152,6 +152,16 @@ python gen_models.py --dataset custom --model mlp --epochs 300 --dataname ba001
 python run_experiments.py --dataset custom --method mlp --dataname ba001
 ```
 
+## WS
+
+Evaluate small-world rewiring and contiguous ring sectors.
+
+```bash
+python generate_synthetic_graph_ws.py --n_nodes 10000 --k 10 --p 0.1 --labeling equal --n_classes 40 --feature_noise_sigma 5
+python gen_models.py --dataset custom --model mlp --epochs 300 --dataname ws001
+python run_experiments.py --dataset custom --method mlp --dataname ws001
+```
+
 ## Products
 
 ### Label Propagation (0 params):

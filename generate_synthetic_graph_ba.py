@@ -233,6 +233,15 @@ def generate_ba_dataset(
     avg_clustering = nx.average_clustering(G)
     avg_degree = 2 * G.number_of_edges() / G.number_of_nodes()
 
+    # Compute centrality scores
+    print("      Computing centrality scores...")
+    degree_centrality = nx.degree_centrality(G)
+    centrality_values = list(degree_centrality.values())
+    centrality_mean = float(np.mean(centrality_values))
+    centrality_std = float(np.std(centrality_values))
+    centrality_max = float(np.max(centrality_values))
+    centrality_min = float(np.min(centrality_values))
+
     # Save metadata
     metadata = {
         "name": name,
@@ -250,6 +259,11 @@ def generate_ba_dataset(
         # Graph metrics
         "avg_clustering": avg_clustering,
         "avg_degree": avg_degree,
+        # Centrality scores (degree centrality)
+        "centrality_mean": centrality_mean,
+        "centrality_std": centrality_std,
+        "centrality_max": centrality_max,
+        "centrality_min": centrality_min,
     }
     save_metadata(metadata, output_dir)
 

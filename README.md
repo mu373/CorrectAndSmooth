@@ -31,9 +31,11 @@ Setup a notebook inside Paperspace gradient with PyTorch 1.12 template.
 
 ### Installation/Running
 ```sh
-git clone --branch pytorch https://github.com/mu373/CorrectAndSmooth.git
-cd CorrectAndSmooth
-mkdir -p embeddings
+# git clone --branch pytorch https://github.com/mu373/CorrectAndSmooth.git
+# cd CorrectAndSmooth
+# mkdir -p embeddings
+
+cd /workspace/CorrectAndSmooth__pytorch-ext
 
 # Install requirements
 pip install -r requirements.txt
@@ -41,6 +43,9 @@ pip install -r requirements.txt
 
 # For data loading
 export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
+
+# Install htop for monitoring (optional)
+apt update -y && apt install htop
 ```
 
 ## Arxiv
@@ -142,6 +147,19 @@ python gen_models.py --dataset custom --dataname ba001 --model mlp --epochs 300 
 python run_experiments.py --dataset custom --dataname ba001 --method mlp
 ```
 
+
+### Aggregating Metadata
+
+Combine metadata.json files from multiple datasets into a single CSV for analysis:
+
+```bash
+python aggregate_dataset_metadata.py --datatype ba
+python aggregate_dataset_metadata.py --datatype ws
+```
+
+Output: `{datatype}_metadata.csv` containing graph properties (n_nodes, n_edges, avg_clustering, centrality metrics, etc.) for all datasets of that type.
+
+
 ## BA
 
 Evaluate the effect of hubs in the dataset. Vary `m` to control degree heterogeneity (hubbiness).
@@ -161,17 +179,6 @@ python generate_synthetic_graph_ws.py --n_nodes 10000 --k 10 --p 0.1 --labeling 
 python gen_models.py --dataset custom --model mlp --epochs 300 --dataname ws001
 python run_experiments.py --dataset custom --method mlp --dataname ws001
 ```
-
-## Aggregating Metadata
-
-Combine metadata.json files from multiple datasets into a single CSV for analysis:
-
-```bash
-python aggregate_dataset_metadata.py --datatype ba
-python aggregate_dataset_metadata.py --datatype ws
-```
-
-Output: `{datatype}_metadata.csv` containing graph properties (n_nodes, n_edges, avg_clustering, centrality metrics, etc.) for all datasets of that type.
 
 ## Products
 

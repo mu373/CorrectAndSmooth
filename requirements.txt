@@ -17,6 +17,7 @@ tqdm
 joblib
 numpy
 scipy
+networkx
 
 # Visualization
 matplotlib

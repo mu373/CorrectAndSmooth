@@ -44,9 +44,23 @@ def generate_ba_graph(n_nodes, m):
     return G
 
 
-def label_by_louvain(G):
-    """Label nodes using Louvain community detection"""
-    communities = nx.community.louvain_communities(G)
+def label_by_louvain(G, n_classes=None):
+    """Label nodes using Louvain community detection
+
+    If n_classes is specified, merge smallest communities until we have n_classes.
+    """
+    communities = list(nx.community.louvain_communities(G))
+
+    # Merge communities if we have too many
+    if n_classes is not None and len(communities) > n_classes:
+        # Sort by size (smallest first) and merge smallest into larger ones
+        communities = sorted(communities, key=len)
+        while len(communities) > n_classes:
+            smallest = communities.pop(0)
+            # Merge into the next smallest
+            communities[0] = communities[0].union(smallest)
+            communities = sorted(communities, key=len)
+
     labels = np.zeros(G.number_of_nodes(), dtype=int)
     for idx, community in enumerate(communities):
         for node in community:
@@ -54,8 +68,13 @@ def label_by_louvain(G):
     return labels
 
 
-def label_by_degree(G, top_n_percent=0.1, bottom_n_percent=0.1):
-    """Label nodes by degree: top=1, bottom=2, middle=0"""
+def label_by_degree(G, n_classes=3, top_n_percent=0.1, bottom_n_percent=0.1):
+    """Label nodes by degree percentile
+
+    - Class 0: top n% by degree (hubs)
+    - Class n_classes-1: bottom n% by degree (spokes)
+    - Classes 1 to n_classes-2: randomly assigned to middle nodes
+    """
     degrees = dict(G.degree())
     sorted_nodes = sorted(degrees.keys(), key=lambda x: degrees[x], reverse=True)
     n = len(sorted_nodes)
@@ -64,10 +83,22 @@ def label_by_degree(G, top_n_percent=0.1, bottom_n_percent=0.1):
     bottom_k = int(n * bottom_n_percent)
 
     labels = np.zeros(n, dtype=int)
+
+    # Top nodes -> class 0
     for node in sorted_nodes[:top_k]:
-        labels[node] = 1
+        labels[node] = 0
+
+    # Bottom nodes -> class n_classes-1
     for node in sorted_nodes[-bottom_k:]:
-        labels[node] = 2
+        labels[node] = n_classes - 1
+
+    # Middle nodes -> random classes 1 to n_classes-2
+    middle_nodes = sorted_nodes[top_k : n - bottom_k]
+    if n_classes > 2 and len(middle_nodes) > 0:
+        middle_classes = np.random.randint(1, n_classes - 1, size=len(middle_nodes))
+        for node, cls in zip(middle_nodes, middle_classes):
+            labels[node] = cls
+
     return labels
 
 
@@ -146,6 +177,7 @@ def generate_ba_dataset(
     n_nodes=1000,
     m=5,
     labeling="louvain",
+    n_classes=None,
     top_n_percent=0.1,
     bottom_n_percent=0.1,
     dim_features=128,
@@ -159,8 +191,9 @@ def generate_ba_dataset(
         n_nodes: Number of nodes
         m: BA graph density (edges per new node)
         labeling: "louvain" or "degree"
-        top_n_percent: Top percent for degree labeling
-        bottom_n_percent: Bottom percent for degree labeling
+        n_classes: Number of classes. For louvain, merges communities. For degree, default is 3.
+        top_n_percent: Top percent for degree labeling (hubs)
+        bottom_n_percent: Bottom percent for degree labeling (spokes)
         dim_features: Feature dimension
         sigma: Noise level (higher = harder classification)
         seed: Random seed
@@ -171,21 +204,26 @@ def generate_ba_dataset(
     # Auto-increment name if not provided
     if name is None:
         name = get_next_name()
+    print(f"[1/4] Generating BA graph: n_nodes={n_nodes}, m={m}")
 
     np.random.seed(seed)
 
     # Generate graph
     G = generate_ba_graph(n_nodes, m)
+    print(f"[2/4] Generating labels: method={labeling}, n_classes={n_classes}")
 
     # Generate labels
     if labeling == "louvain":
-        labels = label_by_louvain(G)
+        labels = label_by_louvain(G, n_classes=n_classes)
     else:
-        labels = label_by_degree(G, top_n_percent, bottom_n_percent)
+        nc = n_classes if n_classes is not None else 3
+        labels = label_by_degree(G, n_classes=nc, top_n_percent=top_n_percent, bottom_n_percent=bottom_n_percent)
 
+    print(f"[3/4] Generating features: dim={dim_features}, sigma={sigma}")
     # Generate features
     features = generate_features(labels, dim_features, sigma)
 
+    print(f"[4/4] Saving to {f'dataset/ba/{name}'}...")
     # Save to dataset/ba/{name}/
     output_dir = f"dataset/ba/{name}"
     save_to_ogb_format(G, labels, features, output_dir)
@@ -196,6 +234,7 @@ def generate_ba_dataset(
         "n_nodes": n_nodes,
         "m": m,
         "labeling": labeling,
+        "n_classes_requested": n_classes,
         "top_n_percent": top_n_percent,
         "bottom_n_percent": bottom_n_percent,
         "dim_features": dim_features,
@@ -206,12 +245,7 @@ def generate_ba_dataset(
     }
     save_metadata(metadata, output_dir)
 
-    print(
-        f"Generated graph with {G.number_of_nodes()} nodes, {G.number_of_edges()} edges"
-    )
-    print(f"Labels: {len(np.unique(labels))} classes")
-    print(f"Features: {features.shape}")
-    print(f"Saved to {output_dir}")
+    print(f"Done! {G.number_of_nodes()} nodes, {G.number_of_edges()} edges, {len(np.unique(labels))} classes, features={features.shape}")
 
     return output_dir
 
@@ -231,6 +265,12 @@ def main():
         choices=["louvain", "degree"],
         default="louvain",
         help="Labeling method: louvain (community) or degree (structural)",
+    )
+    parser.add_argument(
+        "--n_classes",
+        type=int,
+        default=None,
+        help="Number of classes. For louvain, merges communities. For degree, default is 3.",
     )
     parser.add_argument(
         "--top_n_percent",
@@ -267,6 +307,7 @@ def main():
         n_nodes=args.n_nodes,
         m=args.m,
         labeling=args.labeling,
+        n_classes=args.n_classes,
         top_n_percent=args.top_n_percent,
         bottom_n_percent=args.bottom_n_percent,
         dim_features=args.dim_features,

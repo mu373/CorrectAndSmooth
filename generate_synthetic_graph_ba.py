@@ -228,6 +228,11 @@ def generate_ba_dataset(
     output_dir = f"dataset/ba/{name}"
     save_to_ogb_format(G, labels, features, output_dir)
 
+    # Compute graph metrics
+    print("      Computing graph metrics...")
+    avg_clustering = nx.average_clustering(G)
+    avg_degree = 2 * G.number_of_edges() / G.number_of_nodes()
+
     # Save metadata
     metadata = {
         "name": name,
@@ -242,6 +247,9 @@ def generate_ba_dataset(
         "seed": seed,
         "n_edges": G.number_of_edges(),
         "n_classes": len(np.unique(labels)),
+        # Graph metrics
+        "avg_clustering": avg_clustering,
+        "avg_degree": avg_degree,
     }
     save_metadata(metadata, output_dir)
 

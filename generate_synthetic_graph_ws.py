@@ -8,6 +8,7 @@ Usage (CLI):
     python generate_synthetic_graph_ws.py --p 0.8 --labeling highfreq --n_segments 40
     python generate_synthetic_graph_ws.py --labeling imbalanced --majority_frac 0.8
     python generate_synthetic_graph_ws.py --labeling equal --n_classes 6 --p 0.1
+    python generate_synthetic_graph_ws.py --feature_type random_uniform --dim_features 64
 
 Usage (Python):
     from generate_synthetic_graph_ws import generate_ws_dataset
@@ -121,6 +122,16 @@ def generate_sinusoidal_features(
     return features
 
 
+def generate_random_features(
+    n_nodes, dim_features=128, low=0.0, high=1.0, feature_noise_sigma=0.0
+):
+    """Random features sampled uniformly with optional Gaussian noise."""
+    features = np.random.uniform(low, high, size=(n_nodes, dim_features))
+    if feature_noise_sigma > 0:
+        features = features + np.random.randn(*features.shape) * feature_noise_sigma
+    return features
+
+
 def get_next_name(base_dir="dataset/ws"):
     """Find next available name: ws001, ws002, ..."""
     if not os.path.exists(base_dir):
@@ -180,6 +191,7 @@ def generate_ws_dataset(
     minority_class=1,
     dim_features=128,
     num_frequencies=None,
+    feature_type="sinusoidal",
     feature_noise_sigma=0.0,
     seed=42,
 ):
@@ -208,13 +220,24 @@ def generate_ws_dataset(
     else:
         raise ValueError("labeling must be one of: equal, highfreq, imbalanced")
 
-    print(f"[3/4] Generating features: dim={dim_features}, num_freq={num_frequencies}")
-    features = generate_sinusoidal_features(
-        n_nodes,
-        dim_features=dim_features,
-        num_frequencies=num_frequencies,
-        feature_noise_sigma=feature_noise_sigma,
-    )
+    print(f"[3/4] Generating features: type={feature_type}, dim={dim_features}, num_freq={num_frequencies}")
+    if feature_type == "sinusoidal":
+        features = generate_sinusoidal_features(
+            n_nodes,
+            dim_features=dim_features,
+            num_frequencies=num_frequencies,
+            feature_noise_sigma=feature_noise_sigma,
+        )
+        meta_num_freq = num_frequencies if num_frequencies is not None else max(1, dim_features // 2)
+    elif feature_type == "random_uniform":
+        features = generate_random_features(
+            n_nodes,
+            dim_features=dim_features,
+            feature_noise_sigma=feature_noise_sigma,
+        )
+        meta_num_freq = None
+    else:
+        raise ValueError("feature_type must be one of: sinusoidal, random_uniform")
 
     output_dir = f"dataset/ws/{name}"
     print(f"[4/4] Saving to {output_dir}...")
@@ -241,7 +264,8 @@ def generate_ws_dataset(
         "majority_class": majority_class,
         "minority_class": minority_class,
         "dim_features": dim_features,
-        "num_frequencies": num_frequencies if num_frequencies is not None else max(1, dim_features // 2),
+        "feature_type": feature_type,
+        "num_frequencies": meta_num_freq,
         "feature_noise_sigma": feature_noise_sigma,
         "seed": seed,
         "n_edges": G.number_of_edges(),
@@ -323,7 +347,13 @@ def main():
         "--feature_noise_sigma",
         type=float,
         default=0.0,
-        help="Gaussian noise level added to sinusoidal features",
+        help="Gaussian noise level added to generated features",
+    )
+    parser.add_argument(
+        "--feature_type",
+        choices=["sinusoidal", "random_uniform"],
+        default="sinusoidal",
+        help="Feature generation type",
     )
     parser.add_argument(
         "--name",
@@ -348,6 +378,7 @@ def main():
         minority_class=args.minority_class,
         dim_features=args.dim_features,
         num_frequencies=args.num_frequencies,
+        feature_type=args.feature_type,
         feature_noise_sigma=args.feature_noise_sigma,
         seed=args.seed,
     )

@@ -53,8 +53,7 @@ def main():
     for m in M_VALUES:
         lines.append(f"# m={m}")
         for seed in SEEDS:
-            name = f"ba_m{m}_seed{seed}"
-            cmd = generate_command(M_SWEEP_N, m, seed, name)
+            cmd = generate_command(M_SWEEP_N, m, seed)
             lines.append(cmd)
     lines.append("")
 

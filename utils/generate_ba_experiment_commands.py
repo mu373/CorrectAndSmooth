@@ -7,6 +7,9 @@ Usage:
     python utils/generate_ba_experiment_commands.py --indices 1 2 3 10 20
     # Creates commands for specific indices
 
+    python utils/generate_ba_experiment_commands.py --start 1 --end 85 --model linear
+    # Use a different model (default: mlp, choices: mlp, linear, plain)
+
     # Then run:
     bash ba_experiment_commands.txt
     # Or parallel:
@@ -16,15 +19,16 @@ Usage:
 import argparse
 
 # Experiment parameters
-MODEL = "mlp"
+DEFAULT_MODEL = "mlp"
+MODEL_CHOICES = ["mlp", "linear", "plain"]
 EPOCHS = 300
 
 
-def generate_commands(dataname):
+def generate_commands(dataname, model):
     """Generate gen_models and run_experiments commands for a dataset."""
     return [
-        f"python gen_models.py --dataset custom --model {MODEL} --epochs {EPOCHS} --dataname {dataname}",
-        f"python run_experiments.py --dataset custom --method {MODEL} --dataname {dataname}",
+        f"python gen_models.py --dataset custom --model {model} --epochs {EPOCHS} --dataname {dataname}",
+        f"python run_experiments.py --dataset custom --method {model} --dataname {dataname}",
     ]
 
 

@@ -26,7 +26,7 @@ M_SWEEP_N = 10000  # N for m sweep
 N_SWEEP_M = 2      # m for N sweep
 
 
-def generate_command(n_nodes, m, seed, name):
+def generate_command(n_nodes, m, seed):
     return (
         f"python generate_synthetic_graph_ba.py "
         f"--n_nodes {n_nodes} "
@@ -35,8 +35,7 @@ def generate_command(n_nodes, m, seed, name):
         f"--sigma {SIGMA} "
         f"--dim_features {DIM} "
         f"--m {m} "
-        f"--seed {seed} "
-        f"--name {name}"
+        f"--seed {seed}"
     )
 
 

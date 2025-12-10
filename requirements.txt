@@ -18,6 +18,7 @@ joblib
 numpy
 scipy
 networkx
+tailestim
 
 # Visualization
 matplotlib

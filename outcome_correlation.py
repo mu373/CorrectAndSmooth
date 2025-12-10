@@ -414,9 +414,10 @@ def double_correlation_fixed(
     )
 
     fix_y = y[residual_idx].to(device)
+    residual_idx_device = residual_idx.to(device)
 
     def fix_inputs(x):
-        x[residual_idx] = fix_y
+        x[residual_idx_device] = fix_y
         return x
 
     resid = general_outcome_correlation(

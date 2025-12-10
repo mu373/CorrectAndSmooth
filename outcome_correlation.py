@@ -400,6 +400,9 @@ def double_correlation_fixed(
     device=None,
     display=True,
 ):
+    if device is None:
+        device = get_device()
+
     train_idx, valid_idx, test_idx = split_idx
     if train_only:
         label_idx = torch.cat([split_idx["train"]])

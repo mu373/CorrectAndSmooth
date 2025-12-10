@@ -37,6 +37,8 @@ def main():
     parser.add_argument("--start", type=int, help="Start index (e.g., 1 for ba001)")
     parser.add_argument("--end", type=int, help="End index inclusive (e.g., 85 for ba085)")
     parser.add_argument("--indices", type=int, nargs="+", help="Specific indices (e.g., 1 2 3 10 20)")
+    parser.add_argument("--model", type=str, default=DEFAULT_MODEL, choices=MODEL_CHOICES,
+                        help=f"Model to use (default: {DEFAULT_MODEL})")
     args = parser.parse_args()
 
     # Determine indices
@@ -47,18 +49,19 @@ def main():
     else:
         parser.error("Provide either --start/--end or --indices")
 
+    model = args.model
     lines = []
 
     # Header
     lines.append("# BA Graph Experiment Commands")
-    lines.append(f"# Model: {MODEL}, Epochs: {EPOCHS}")
+    lines.append(f"# Model: {model}, Epochs: {EPOCHS}")
     lines.append(f"# Datasets: ba{indices[0]:03d} to ba{indices[-1]:03d} ({len(indices)} datasets)")
     lines.append("")
 
     for idx in indices:
         dataname = f"ba{idx:03d}"
         lines.append(f"# {dataname}")
-        for cmd in generate_commands(dataname):
+        for cmd in generate_commands(dataname, model):
             lines.append(cmd)
 
     # Write to file

@@ -37,6 +37,9 @@ import gzip
 import json
 import os
 
+from utils.degree_distribution import compute_degree_distribution
+from utils.power_law_estimator import estimate_power_law
+
 
 def generate_ba_graph(n_nodes, m):
     """Generate Barabasi-Albert graph"""
@@ -242,7 +245,15 @@ def generate_ba_dataset(
     centrality_max = float(np.max(centrality_values))
     centrality_min = float(np.min(centrality_values))
 
-    # Save metadata
+    # Compute and save degree distribution (in-memory from graph)
+    print("      Computing degree distribution...")
+    degree_dist_result = compute_degree_distribution(G, output_dir=output_dir)
+
+    # Estimate power law exponent (reuse degrees from above)
+    print("      Estimating power law exponent...")
+    power_law_result = estimate_power_law(degree_dist_result["degrees"], output_dir=output_dir)
+
+    # Save metadata (including power law)
     metadata = {
         "name": name,
         "n_nodes": n_nodes,
@@ -264,6 +275,8 @@ def generate_ba_dataset(
         "centrality_std": centrality_std,
         "centrality_max": centrality_max,
         "centrality_min": centrality_min,
+        # Power law exponent
+        "power_law_gamma": power_law_result["gamma"],
     }
     save_metadata(metadata, output_dir)
 

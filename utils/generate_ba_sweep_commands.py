@@ -63,8 +63,7 @@ def main():
     for n in N_VALUES:
         lines.append(f"# N={n}")
         for seed in SEEDS:
-            name = f"ba_n{n}_seed{seed}"
-            cmd = generate_command(n, N_SWEEP_M, seed, name)
+            cmd = generate_command(n, N_SWEEP_M, seed)
             lines.append(cmd)
 
     # Write to file

@@ -14,7 +14,7 @@ import itertools
 # Experiment parameters
 DATASETS = ["arxiv", "products"]
 NORM_STYLES = ["symmetric", "left", "right"]
-ADJACENCIES = ["standard", "signless_laplacian"]
+ADJACENCIES = ["standard", "signless_laplacian", "laplacian"]
 METHOD = "mlp"
 
 
@@ -35,7 +35,9 @@ def main():
     lines.append("")
 
     # Generate all combinations
-    for dataset, norm_style, adjacency in itertools.product(DATASETS, NORM_STYLES, ADJACENCIES):
+    for dataset, norm_style, adjacency in itertools.product(
+        DATASETS, NORM_STYLES, ADJACENCIES
+    ):
         lines.append(generate_command(dataset, norm_style, adjacency))
 
     # Write to file

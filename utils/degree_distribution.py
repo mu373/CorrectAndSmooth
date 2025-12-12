@@ -104,7 +104,10 @@ def main():
     parser.add_argument("--no-save", action="store_true", help="Don't save to JSON file")
     args = parser.parse_args()
 
-    result = compute_degree_distribution(args.edge_list_path, save=not args.no_save)
+    if args.no_save:
+        result = compute_degree_distribution(args.edge_list_path, output_dir=None)
+    else:
+        result = compute_degree_distribution(args.edge_list_path)
 
     print(f"Stats: {result['stats']}")
     print(f"Degree distribution (top 10):")

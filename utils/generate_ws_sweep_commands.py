@@ -14,7 +14,8 @@ Usage:
 P_VALUES = [0.01, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8]
 N_VALUES = [1000, 2000, 5000, 10000, 20000, 50000, 100000]
 SEEDS = [1, 2, 3, 4, 5]
-LABELINGS = ["equal", "highfreq"]
+# Only generate "equal" labeling sweeps
+LABELINGS = ["equal"]
 
 # Common parameters
 K = 10

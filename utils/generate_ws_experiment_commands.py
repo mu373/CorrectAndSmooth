@@ -38,6 +38,12 @@ def main():
     parser.add_argument("--end", type=int, help="End index inclusive (e.g., 50 for ws050)")
     parser.add_argument("--indices", type=int, nargs="+", help="Specific indices (e.g., 1 2 3 10 20)")
     parser.add_argument(
+        "--output",
+        type=str,
+        default="ws_experiment_commands.txt",
+        help="Output filename for generated commands",
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=DEFAULT_MODEL,
@@ -70,7 +76,7 @@ def main():
             lines.append(cmd)
 
     # Write to file
-    output_file = "ws_experiment_commands.txt"
+    output_file = args.output
     with open(output_file, "w") as f:
         for line in lines:
             f.write(line + "\n")

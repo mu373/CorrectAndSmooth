@@ -31,7 +31,7 @@ class Logger(object):
                 test = r[r[:, 1].argmax(), 2].item()
                 best_results.append((train1, valid, train2, test))
 
-            best_result = torch.tensor(best_results)
+            best_result = torch.tensor(best_results).reshape(-1, 4)
 
             print(f'All runs:')
             r = best_result[:, 0]

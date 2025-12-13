@@ -2,30 +2,28 @@ import argparse
 
 import torch
 import torch.nn.functional as F
-import torch.nn as nn
-from tqdm import tqdm
-
-
-from copy import deepcopy
-import torch_geometric.transforms as T
-from torch_geometric.nn import GCNConv, SAGEConv
-from torch_sparse import SparseTensor
-from torch_geometric.utils import to_undirected
-import numpy as np
 
 
 from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
 from outcome_correlation import prepare_folder
 from diffusion_feature import preprocess
-import glob
-import os
-import shutil
 
 from logger import Logger
+from custom_dataset import CustomDataset, preprocess_custom, get_prefix
+from custom_evaluator import CustomEvaluator
+from results_logger import save_gen_models_result
+
 
 class MLP(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, num_layers,
-                 dropout, relu_first = True):
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels,
+        out_channels,
+        num_layers,
+        dropout,
+        relu_first=True,
+    ):
         super(MLP, self).__init__()
         self.lins = torch.nn.ModuleList()
         self.lins.append(torch.nn.Linear(in_channels, hidden_channels))
@@ -45,7 +43,7 @@ class MLP(torch.nn.Module):
         for bn in self.bns:
             bn.reset_parameters()
 
-    def forward(self, x):    
+    def forward(self, x):
         for i, lin in enumerate(self.lins[:-1]):
             x = lin(x)
             if self.relu_first:
@@ -54,12 +52,10 @@ class MLP(torch.nn.Module):
             if not self.relu_first:
                 x = F.relu(x, inplace=True)
 
-
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lins[-1](x)
         return F.log_softmax(x, dim=-1)
-    
-    
+
 
 class MLPLinear(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
@@ -72,7 +68,7 @@ class MLPLinear(torch.nn.Module):
     def forward(self, x):
         return F.log_softmax(self.lin(x), dim=-1)
 
-    
+
 def train(model, x, y_true, train_idx, optimizer):
     model.train()
 
@@ -92,93 +88,137 @@ def test(model, x, y, split_idx, evaluator):
     out = model(x)
     y_pred = out.argmax(dim=-1, keepdim=True)
 
-    train_acc = evaluator.eval({
-        'y_true': y[split_idx['train']],
-        'y_pred': y_pred[split_idx['train']],
-    })['acc']
-    valid_acc = evaluator.eval({
-        'y_true': y[split_idx['valid']],
-        'y_pred': y_pred[split_idx['valid']],
-    })['acc']
-    test_acc = evaluator.eval({
-        'y_true': y[split_idx['test']],
-        'y_pred': y_pred[split_idx['test']],
-    })['acc']
+    train_acc = evaluator.eval(
+        {
+            "y_true": y[split_idx["train"]],
+            "y_pred": y_pred[split_idx["train"]],
+        }
+    )["acc"]
+    valid_acc = evaluator.eval(
+        {
+            "y_true": y[split_idx["valid"]],
+            "y_pred": y_pred[split_idx["valid"]],
+        }
+    )["acc"]
+    test_acc = evaluator.eval(
+        {
+            "y_true": y[split_idx["test"]],
+            "y_pred": y_pred[split_idx["test"]],
+        }
+    )["acc"]
 
     return (train_acc, valid_acc, test_acc), out
 
-    
-        
-            
+
 def main():
-    parser = argparse.ArgumentParser(description='gen_models')
-    parser.add_argument('--device', type=int, default=0)
-    parser.add_argument('--dataset', type=str, default='arxiv')
-    parser.add_argument('--log_steps', type=int, default=1)
-    parser.add_argument('--model', type=str, default='mlp')
-    parser.add_argument('--num_layers', type=int, default=3)
-    parser.add_argument('--hidden_channels', type=int, default=256)
-    parser.add_argument('--use_embeddings', action='store_true')
-    parser.add_argument('--dropout', type=float, default=0.5)
-    parser.add_argument('--lr', type=float, default=0.01)
-    parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--runs', type=int, default=10)
+    parser = argparse.ArgumentParser(description="gen_models")
+    parser.add_argument("--device", type=int, default=0)
+    parser.add_argument("--dataset", type=str, default="arxiv")
+    parser.add_argument(
+        "--dataname",
+        type=str,
+        default=None,
+        help="Dataset name for custom datasets (e.g., ba001)",
+    )
+    parser.add_argument("--log_steps", type=int, default=1)
+    parser.add_argument("--model", type=str, default="mlp")
+    parser.add_argument("--num_layers", type=int, default=3)
+    parser.add_argument("--hidden_channels", type=int, default=256)
+    parser.add_argument("--use_embeddings", action="store_true")
+    parser.add_argument("--dropout", type=float, default=0.5)
+    parser.add_argument("--lr", type=float, default=0.01)
+    parser.add_argument("--epochs", type=int, default=300)
+    parser.add_argument("--runs", type=int, default=10)
 
     args = parser.parse_args()
     print(args)
 
-    
-    device = f'cuda:{args.device}' if torch.cuda.is_available() else 'cpu'
+    # Validate arguments
+    if args.dataset == "custom" and args.dataname is None:
+        parser.error("--dataname is required when --dataset is 'custom'")
+
+    device = f"cuda:{args.device}" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
 
-    dataset = PygNodePropPredDataset(name=f'ogbn-{args.dataset}',transform=T.ToSparseTensor())
-    
+    # Load dataset
+    if args.dataset == "custom":
+        dataset = CustomDataset(args.dataname)
+        evaluator = CustomEvaluator()
+    else:
+        dataset = PygNodePropPredDataset(name=f"ogbn-{args.dataset}")
+        evaluator = Evaluator(name=f"ogbn-{args.dataset}")
+
     data = dataset[0]
-    data.adj_t = data.adj_t.to_symmetric()
-    
+
     x = data.x
 
-    
     split_idx = dataset.get_idx_split()
-    preprocess_data = PygNodePropPredDataset(name=f'ogbn-{args.dataset}')[0]
-    if args.dataset == 'arxiv':
-        embeddings = torch.cat([preprocess(preprocess_data, 'diffusion', post_fix=args.dataset), 
-                                preprocess(preprocess_data, 'spectral', post_fix=args.dataset)], dim=-1)
-    elif args.dataset == 'products':
-        embeddings = preprocess(preprocess_data, 'spectral', post_fix=args.dataset)
-        
-    if args.use_embeddings:
-        x = torch.cat([x, embeddings], dim=-1)
-        
-    if args.dataset == 'arxiv':
-        x = (x-x.mean(0))/x.std(0)
 
-    if args.model == 'mlp':        
-        model = MLP(x.size(-1),args.hidden_channels, dataset.num_classes, args.num_layers, 0.5, args.dataset == 'products').cuda()
-    elif args.model=='linear':
-        model = MLPLinear(x.size(-1), dataset.num_classes).cuda()
-    elif args.model=='plain':
-        model = MLPLinear(x.size(-1), dataset.num_classes).cuda()
+    # Handle embeddings
+    if args.use_embeddings:
+        if args.dataset == "custom":
+            embeddings = preprocess_custom(data, args.dataname, "spectral")
+            x = torch.cat([x, embeddings], dim=-1)
+        else:
+            preprocess_data = PygNodePropPredDataset(name=f"ogbn-{args.dataset}")[0]
+            if args.dataset == "arxiv":
+                embeddings = torch.cat(
+                    [
+                        preprocess(preprocess_data, "diffusion", post_fix=args.dataset),
+                        preprocess(preprocess_data, "spectral", post_fix=args.dataset),
+                    ],
+                    dim=-1,
+                )
+            elif args.dataset == "products":
+                embeddings = preprocess(
+                    preprocess_data, "spectral", post_fix=args.dataset
+                )
+            x = torch.cat([x, embeddings], dim=-1)
+
+    # Feature standardization (only for arxiv)
+    if args.dataset == "arxiv":
+        x = (x - x.mean(0)) / x.std(0)
+
+    # Determine relu_first setting
+    relu_first = args.dataset == "products"
+
+    if args.model == "mlp":
+        model = MLP(
+            x.size(-1),
+            args.hidden_channels,
+            dataset.num_classes,
+            args.num_layers,
+            0.5,
+            relu_first,
+        ).to(device)
+    elif args.model == "linear":
+        model = MLPLinear(x.size(-1), dataset.num_classes).to(device)
+    elif args.model == "plain":
+        model = MLPLinear(x.size(-1), dataset.num_classes).to(device)
 
     x = x.to(device)
     y_true = data.y.to(device)
-    train_idx = split_idx['train'].to(device)
+    train_idx = split_idx["train"].to(device)
 
-    
-    model_dir = prepare_folder(f'{args.dataset}_{args.model}', model)
-
-    
-    evaluator = Evaluator(name=f'ogbn-{args.dataset}')
+    # Model directory name
+    if args.dataset == "custom":
+        prefix = get_prefix(args.dataname)
+        model_dir = prepare_folder(f"{prefix}/{args.dataname}-{args.model}", model)
+    else:
+        model_dir = prepare_folder(f"{args.dataset}_{args.model}", model)
     logger = Logger(args.runs, args)
-    
+
     for run in range(args.runs):
         import gc
+
         gc.collect()
         print(sum(p.numel() for p in model.parameters()))
         model.reset_parameters()
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
         best_valid = 0
         best_out = None
+        best_train = 0
+        best_test = 0
         for epoch in range(1, args.epochs):
             loss = train(model, x, y_true, train_idx, optimizer)
             result, out = test(model, x, y_true, split_idx, evaluator)
@@ -186,21 +226,27 @@ def main():
             if valid_acc > best_valid:
                 best_valid = valid_acc
                 best_out = out.cpu().exp()
-        
-            print(f'Run: {run + 1:02d}, '
-                      f'Epoch: {epoch:02d}, '
-                      f'Loss: {loss:.4f}, '
-                      f'Train: {100 * train_acc:.2f}%, '
-                      f'Valid: {100 * valid_acc:.2f}% '
-                      f'Test: {100 * test_acc:.2f}%')
+                best_train = train_acc
+                best_test = test_acc
+
+            print(
+                f"Run: {run + 1:02d}, "
+                f"Epoch: {epoch:02d}, "
+                f"Loss: {loss:.4f}, "
+                f"Train: {100 * train_acc:.2f}%, "
+                f"Valid: {100 * valid_acc:.2f}% "
+                f"Test: {100 * test_acc:.2f}%"
+            )
             logger.add_result(run, result)
 
         logger.print_statistics(run)
-        torch.save(best_out, f'{model_dir}/{run}.pt')
+        torch.save(best_out, f"{model_dir}/{run}.pt")
+
+        # Save results to CSV
+        dataname = args.dataname if args.dataset == "custom" else args.dataset
+        save_gen_models_result(dataname, args, run, best_train, best_valid, best_test)
 
     logger.print_statistics()
-
-
 
 
 if __name__ == "__main__":

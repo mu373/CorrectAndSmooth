@@ -1,0 +1,29 @@
+# PyTorch with CUDA support (installed via pip with CUDA index)
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch
+torchvision
+torchaudio
+
+# PyTorch Geometric
+torch-geometric
+
+# OGB (Open Graph Benchmark)
+ogb
+
+# Utilities
+h5py
+optuna
+tqdm
+joblib
+numpy
+scipy
+networkx
+tailestim
+
+# Visualization
+matplotlib
+
+# Jupyter
+jupyterlab
+notebook
+ipywidgets

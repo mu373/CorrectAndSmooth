@@ -15,6 +15,39 @@ This directory contains OGB submissions. All hyperparameters were tuned on the v
 
 - In general, autoscale works more reliably than fixedscale, even though fixedscale may make more sense...
 
+## Setup
+
+### Environments
+
+**Paperspace gradient**
+Setup a notebook inside Paperspace gradient with PyTorch 1.12 template.
+- Image (default): `paperspace/gradient-base:pt211-tf215-cudatk120-py311-20240202`
+
+**Runpod**
+- GPU: A40 (VRAM 48GB)
+- Template: Runpod Pytorch 2.8.0 (runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404)
+- https://console.runpod.io/deploy?gpu=A40&count=1&template=runpod-torch-v280
+
+
+### Installation/Running
+```sh
+# git clone --branch pytorch https://github.com/mu373/CorrectAndSmooth.git
+# cd CorrectAndSmooth
+# mkdir -p embeddings
+
+cd /workspace/CorrectAndSmooth__pytorch-ext
+
+# Install requirements
+pip install -r requirements.txt
+# pip install -r requirements.lock
+
+# For data loading
+export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
+
+# Install htop for monitoring (optional)
+apt update -y && apt install htop
+```
+
 ## Arxiv
 
 ### Label Propagation (0 params):
@@ -54,8 +87,8 @@ Args []: 73.91 ± 0.15 -> 73.12 ± 0.12
 
 ### GAT + C&S (1567000 params, 73.56% base accuracy)
 ```
-cd gat && python gat.py --use-norm
-cd .. && python run_experiments.py --dataset arxiv --method gat
+python gat/gat.py --use-norm
+python run_experiments.py --dataset arxiv --method gat
 
 Valid acc -> Test acc
 Args []: 74.84 ± 0.07 -> 73.86 ± 0.14
@@ -63,6 +96,89 @@ Args []: 74.84 ± 0.07 -> 73.86 ± 0.14
 
 ### Notes
 As opposed to the paper's results, which only use spectral embeddings, here we use spectral *and* diffusion embeddings, which we find improves Arxiv performance.
+
+## Custom Datasets
+
+You can run C&S on custom graph data using `--dataset custom --dataname <name>`.
+
+### Data Format
+```
+dataset/{prefix}/{dataname}/
+├── edge.csv(.gz)       # source,target pairs (no header)
+├── node-feat.csv(.gz)  # node features, comma-separated
+├── node-label.csv(.gz) # one integer label per line
+└── split/              # optional (auto-generated 60/20/20 if missing)
+    ├── train.csv(.gz)
+    ├── valid.csv(.gz)
+    └── test.csv(.gz)
+```
+
+Prefix is extracted from dataname: `ba001` → `ba`, `ws001` → `ws`.
+
+### Output Paths
+- Models: `models/{prefix}/{dataname}-{model}/`
+- Embeddings: `embeddings/{prefix}/{dataname}-spectral.pt`
+- Results: `results/gen_models.csv`, `results/run_experiments.csv`
+
+### Results CSV Format
+One row per run, appended across experiments.
+
+**gen_models.csv** (base model training):
+```
+dataname,model,epochs,hidden_channels,use_embeddings,run,train,valid,test
+ba001,mlp,300,256,True,0,0.923,0.861,0.840
+```
+
+**run_experiments.csv** (C&S post-processing):
+```
+dataname,method,normalizer,adjacency,norm_style,run,orig_valid,orig_test,cs_valid,cs_test
+ba001,mlp,degree,standard,symmetric,0,0.861,0.840,0.883,0.869
+```
+
+### Example
+```bash
+# Train MLP
+python gen_models.py --dataset custom --dataname ba001 --model mlp --epochs 300
+
+# With spectral embeddings
+python gen_models.py --dataset custom --dataname ba001 --model mlp --epochs 300 --use_embeddings
+
+# Run C&S
+python run_experiments.py --dataset custom --dataname ba001 --method mlp
+```
+
+
+### Aggregating Metadata
+
+Combine metadata.json files from multiple datasets into a single CSV for analysis:
+
+```bash
+python aggregate_dataset_metadata.py --datatype ba
+python aggregate_dataset_metadata.py --datatype ws
+```
+
+Output: `{datatype}_metadata.csv` containing graph properties (n_nodes, n_edges, avg_clustering, centrality metrics, etc.) for all datasets of that type.
+
+
+## BA
+
+Evaluate the effect of hubs in the dataset. Vary `m` to control degree heterogeneity (hubbiness).
+
+```bash
+python generate_synthetic_graph_ba.py --n_nodes 10000 --labeling louvain --n_classes 40 --sigma 5 --m 1
+python gen_models.py --dataset custom --model mlp --epochs 300 --dataname ba001
+python run_experiments.py --dataset custom --method mlp --dataname ba001
+```
+
+## WS
+
+Evaluate small-world rewiring and contiguous ring sectors. Vary `p` to control clustering coefficient.
+
+```bash
+python generate_synthetic_graph_ws.py --n_nodes 10000 --k 10 --p 0.1 --labeling equal --n_classes 40 --feature_noise_sigma 5
+python gen_models.py --dataset custom --model mlp --epochs 300 --dataname ws001
+python run_experiments.py --dataset custom --method mlp --dataname ws001
+```
 
 ## Products
 

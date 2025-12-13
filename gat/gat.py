@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+import gc
 import math
 import time
 import os
@@ -13,8 +14,9 @@ import torch.nn.functional as F
 import torch.optim as optim
 from matplotlib import pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
-from ogb.nodeproppred import DglNodePropPredDataset, Evaluator
+from ogb.nodeproppred import PygNodePropPredDataset, Evaluator
 from outcome_correlation import prepare_folder
+from torch_geometric.utils import to_undirected
 
 from models import GAT
 
@@ -76,10 +78,8 @@ def adjust_learning_rate(optimizer, lr, epoch):
             param_group["lr"] = lr * epoch / 50
 
 
-def train(model, graph, labels, train_idx, optimizer, use_labels):
+def train(model, edge_index, feat, labels, train_idx, optimizer, use_labels):
     model.train()
-
-    feat = graph.ndata["feat"]
 
     if use_labels:
         mask_rate = 0.5
@@ -96,7 +96,7 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
         train_pred_idx = train_idx[mask]
 
     optimizer.zero_grad()
-    pred = model(graph, feat)
+    pred = model(feat, edge_index)
     loss = cross_entropy(pred[train_pred_idx], labels[train_pred_idx])
     loss.backward()
     optimizer.step()
@@ -105,14 +105,12 @@ def train(model, graph, labels, train_idx, optimizer, use_labels):
 
 
 @th.no_grad()
-def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, evaluator):
+def evaluate(model, edge_index, feat, labels, train_idx, val_idx, test_idx, use_labels, evaluator):
     model.eval()
-
-    feat = graph.ndata["feat"]
 
     if use_labels:
         feat = add_labels(feat, labels, train_idx)
-    pred = model(graph, feat)
+    pred = model(feat, edge_index)
     train_loss = cross_entropy(pred[train_idx], labels[train_idx])
     val_loss = cross_entropy(pred[val_idx], labels[val_idx])
     test_loss = cross_entropy(pred[test_idx], labels[test_idx])
@@ -128,7 +126,7 @@ def evaluate(model, graph, labels, train_idx, val_idx, test_idx, use_labels, eva
     )
 
 
-def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running):
+def run(args, edge_index, feat, labels, train_idx, val_idx, test_idx, evaluator, n_running):
     # define model and optimizer
     model = gen_model(args)
     print(count_parameters(args))
@@ -149,11 +147,11 @@ def run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, n_running)
 
         adjust_learning_rate(optimizer, args.lr, epoch)
 
-        loss, pred = train(model, graph, labels, train_idx, optimizer, args.use_labels)
+        loss, pred = train(model, edge_index, feat, labels, train_idx, optimizer, args.use_labels)
         acc = compute_acc(pred[train_idx], labels[train_idx], evaluator)
 
         train_acc, val_acc, test_acc, train_loss, val_loss, test_loss, out = evaluate(
-            model, graph, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
+            model, edge_index, feat, labels, train_idx, val_idx, test_idx, args.use_labels, evaluator
         )
 
         toc = time.time()
@@ -230,6 +228,11 @@ def count_parameters(args):
 def main():
     global device, in_feats, n_classes, epsilon
 
+    # Clear any existing GPU memory
+    gc.collect()
+    if th.cuda.is_available():
+        th.cuda.empty_cache()
+
     argparser = argparse.ArgumentParser("GAT on OGBN-Arxiv", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     argparser.add_argument("--cpu", action="store_true", help="CPU mode. This option overrides --gpu.")
     argparser.add_argument("--gpu", type=int, default=0, help="GPU device ID.")
@@ -252,41 +255,43 @@ def main():
 
     if args.cpu:
         device = th.device("cpu")
-    else:
+    elif th.cuda.is_available():
         device = th.device("cuda:%d" % args.gpu)
+    else:
+        device = th.device("cpu")
 
     # load data
-    data = DglNodePropPredDataset(name="ogbn-arxiv")
+    dataset = PygNodePropPredDataset(name="ogbn-arxiv")
     evaluator = Evaluator(name="ogbn-arxiv")
 
-    splitted_idx = data.get_idx_split()
-    train_idx, val_idx, test_idx = splitted_idx["train"], splitted_idx["valid"], splitted_idx["test"]
-    graph, labels = data[0]
+    split_idx = dataset.get_idx_split()
+    train_idx, val_idx, test_idx = split_idx["train"], split_idx["valid"], split_idx["test"]
+    data = dataset[0]
 
-    # add reverse edges
-    srcs, dsts = graph.all_edges()
-    graph.add_edges(dsts, srcs)
+    # Make graph undirected using to_undirected
+    edge_index = to_undirected(data.edge_index, num_nodes=data.num_nodes)
+    print(f"Total edges: {edge_index.size(1)}")
 
-    # add self-loop
-    print(f"Total edges before adding self-loop {graph.number_of_edges()}")
-    graph = graph.remove_self_loop().add_self_loop()
-    print(f"Total edges after adding self-loop {graph.number_of_edges()}")
+    # Extract node features and labels
+    feat = data.x
+    labels = data.y
 
-    in_feats = graph.ndata["feat"].shape[1]
+    in_feats = feat.shape[1]
     n_classes = (labels.max() + 1).item()
-    # graph.create_format_()
 
+    # Move data to device
     train_idx = train_idx.to(device)
     val_idx = val_idx.to(device)
     test_idx = test_idx.to(device)
     labels = labels.to(device)
-    graph = graph.to(device)
+    feat = feat.to(device)
+    edge_index = edge_index.to(device)
 
     # run
     val_accs = []
     test_accs = []
     model_dir = f'../models/arxiv_gat'
-       
+
     if os.path.exists(model_dir):
         shutil.rmtree(model_dir)
     os.makedirs(model_dir)
@@ -294,7 +299,7 @@ def main():
         f.write(f'# of params: {sum(p.numel() for p in gen_model(args).parameters())}\n')
 
     for i in range(1, args.n_runs + 1):
-        val_acc, test_acc, out = run(args, graph, labels, train_idx, val_idx, test_idx, evaluator, i)
+        val_acc, test_acc, out = run(args, edge_index, feat, labels, train_idx, val_idx, test_idx, evaluator, i)
         val_accs.append(val_acc)
         test_accs.append(test_acc)
         th.save(F.softmax(out, dim=1), f'{model_dir}/{i-1}.pt')

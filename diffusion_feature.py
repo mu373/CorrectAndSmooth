@@ -2,14 +2,12 @@ from tqdm import tqdm
 
 import torch
 import torch.nn.functional as F
-from torch_sparse import SparseTensor
 from torch_geometric.utils import to_undirected, dropout_adj
 from torch_geometric.data import Data
 
 from copy import deepcopy
 import numpy as np
 from scipy import sparse
-from torch_scatter import scatter
 
 import h5py
 import os
@@ -80,22 +78,22 @@ def community(data, post_fix):
     return result
 
 def spectral(data, post_fix):
-    from julia.api import Julia
-    jl = Julia(compiled_modules=False)
-    from julia import Main
-    Main.include("./norm_spec.jl")
+    from norm_spec import spectral_embedding
+
     print('Setting up spectral embedding')
     data.edge_index = to_undirected(data.edge_index)
-    np_edge_index = np.array(data.edge_index.T)
 
-    
     N = data.num_nodes
     row, col = data.edge_index
-    adj = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
-    adj = adj.to_scipy(layout='csr')
-    result = torch.tensor(Main.main(adj, 128)).float()
+    # Create scipy sparse matrix directly
+    adj = sparse.csr_matrix((np.ones(row.shape[0]), (row.numpy(), col.numpy())), shape=(N, N))
+
+    # Use pure Python spectral embedding
+    embedding = spectral_embedding(adj, k=128)
+    result = torch.tensor(embedding).float()
+
     torch.save(result, f'embeddings/spectral{post_fix}.pt')
-        
+
     return result
 
 
@@ -121,14 +119,15 @@ def preprocess(data, preprocess = "diffusion", num_propagations = 10, p = None, 
     data.edge_index = to_undirected(data.edge_index, data.num_nodes)
 
     row, col = data.edge_index
-    adj = SparseTensor(row=row, col=col, sparse_sizes=(N, N))
-    adj = adj.set_diag()
-    deg = adj.sum(dim=1).to(torch.float)
-    deg_inv_sqrt = deg.pow(-0.5)
-    deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
-    adj = deg_inv_sqrt.view(-1, 1) * adj * deg_inv_sqrt.view(1, -1)
-
-    adj = adj.to_scipy(layout='csr')
+    # Create scipy sparse matrix directly and add self-loops
+    adj = sparse.csr_matrix((np.ones(row.shape[0]), (row.numpy(), col.numpy())), shape=(N, N))
+    adj = adj + sparse.eye(N)  # set_diag equivalent
+    deg = np.array(adj.sum(axis=1)).flatten()
+    deg_inv_sqrt = np.power(deg, -0.5)
+    deg_inv_sqrt[np.isinf(deg_inv_sqrt)] = 0
+    # D^{-1/2} A D^{-1/2} normalization
+    adj = sparse.diags(deg_inv_sqrt) @ adj @ sparse.diags(deg_inv_sqrt)
+    adj = adj.tocsr()
 
     sgc_dict = {}
         

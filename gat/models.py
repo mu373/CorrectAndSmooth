@@ -1,11 +1,8 @@
-import dgl.nn.pytorch as dglnn
 import torch
 import torch.nn as nn
-from dgl import function as fn
-from dgl._ffi.base import DGLError
-from dgl.nn.pytorch.utils import Identity
-from dgl.ops import edge_softmax
-from dgl.utils import expand_as_pair
+import torch.nn.functional as F
+from torch_geometric.nn import GATConv as PyGGATConv
+from torch_geometric.utils import softmax
 
 
 class Bias(nn.Module):
@@ -22,56 +19,11 @@ class Bias(nn.Module):
         return x + self.bias
 
 
-class GCN(nn.Module):
-    def __init__(self, in_feats, n_hidden, n_classes, n_layers, activation, dropout, use_linear):
-        super().__init__()
-        self.n_layers = n_layers
-        self.n_hidden = n_hidden
-        self.n_classes = n_classes
-        self.use_linear = use_linear
-
-        self.convs = nn.ModuleList()
-        if use_linear:
-            self.linear = nn.ModuleList()
-        self.bns = nn.ModuleList()
-
-        for i in range(n_layers):
-            in_hidden = n_hidden if i > 0 else in_feats
-            out_hidden = n_hidden if i < n_layers - 1 else n_classes
-            bias = i == n_layers - 1
-
-            self.convs.append(dglnn.GraphConv(in_hidden, out_hidden, "both", bias=bias))
-            if use_linear:
-                self.linear.append(nn.Linear(in_hidden, out_hidden, bias=False))
-            if i < n_layers - 1:
-                self.bns.append(nn.BatchNorm1d(out_hidden))
-
-        self.dropout0 = nn.Dropout(min(0.1, dropout))
-        self.dropout = nn.Dropout(dropout)
-        self.activation = activation
-
-    def forward(self, graph, feat):
-        h = feat
-        h = self.dropout0(h)
-
-        for i in range(self.n_layers):
-            conv = self.convs[i](graph, h)
-
-            if self.use_linear:
-                linear = self.linear[i](h)
-                h = conv + linear
-            else:
-                h = conv
-
-            if i < self.n_layers - 1:
-                h = self.bns[i](h)
-                h = self.activation(h)
-                h = self.dropout(h)
-
-        return h
-
-
 class GATConv(nn.Module):
+    """
+    GAT Convolution layer using PyTorch Geometric with hybrid approach.
+    Uses PyG's GATConv as base and adds custom symmetric normalization.
+    """
     def __init__(
         self,
         in_feats,
@@ -87,113 +39,104 @@ class GATConv(nn.Module):
     ):
         super(GATConv, self).__init__()
         if norm not in ("none", "both"):
-            raise DGLError('Invalid norm value. Must be either "none", "both".' ' But got "{}".'.format(norm))
+            raise ValueError('Invalid norm value. Must be either "none", "both". But got "{}".'.format(norm))
+
         self._num_heads = num_heads
-        self._in_src_feats, self._in_dst_feats = expand_as_pair(in_feats)
+        self._in_feats = in_feats
         self._out_feats = out_feats
         self._allow_zero_in_degree = allow_zero_in_degree
         self._norm = norm
-        if isinstance(in_feats, tuple):
-            self.fc_src = nn.Linear(self._in_src_feats, out_feats * num_heads, bias=False)
-            self.fc_dst = nn.Linear(self._in_dst_feats, out_feats * num_heads, bias=False)
-        else:
-            self.fc = nn.Linear(self._in_src_feats, out_feats * num_heads, bias=False)
-        self.attn_l = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
-        self.attn_r = nn.Parameter(torch.FloatTensor(size=(1, num_heads, out_feats)))
+
+        # Use PyTorch Geometric's GATConv
+        self.gat_conv = PyGGATConv(
+            in_feats,
+            out_feats,
+            heads=num_heads,
+            concat=True,  # Concatenate heads
+            negative_slope=negative_slope,
+            dropout=attn_drop,
+            add_self_loops=False,  # We handle self-loops externally
+            bias=False,
+        )
+
         self.feat_drop = nn.Dropout(feat_drop)
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.leaky_relu = nn.LeakyReLU(negative_slope)
+
+        # Residual connection
         if residual:
-            if self._in_dst_feats != out_feats:
-                self.res_fc = nn.Linear(self._in_dst_feats, num_heads * out_feats, bias=False)
+            if in_feats != out_feats * num_heads:
+                self.res_fc = nn.Linear(in_feats, num_heads * out_feats, bias=False)
             else:
-                self.res_fc = Identity()
+                self.res_fc = nn.Identity()
         else:
-            self.register_buffer("res_fc", None)
-        self.reset_parameters()
+            self.res_fc = None
+
         self._activation = activation
+        self.reset_parameters()
 
     def reset_parameters(self):
-        gain = nn.init.calculate_gain("relu")
-        if hasattr(self, "fc"):
-            nn.init.xavier_normal_(self.fc.weight, gain=gain)
-        else:
-            nn.init.xavier_normal_(self.fc_src.weight, gain=gain)
-            nn.init.xavier_normal_(self.fc_dst.weight, gain=gain)
-        nn.init.xavier_normal_(self.attn_l, gain=gain)
-        nn.init.xavier_normal_(self.attn_r, gain=gain)
+        self.gat_conv.reset_parameters()
         if isinstance(self.res_fc, nn.Linear):
+            gain = nn.init.calculate_gain("relu")
             nn.init.xavier_normal_(self.res_fc.weight, gain=gain)
 
     def set_allow_zero_in_degree(self, set_value):
         self._allow_zero_in_degree = set_value
 
-    def forward(self, graph, feat):
-        with graph.local_scope():
-            if not self._allow_zero_in_degree:
-                if (graph.in_degrees() == 0).any():
-                    assert False
+    def forward(self, x, edge_index, edge_weight=None):
+        """
+        Forward pass.
 
-            if isinstance(feat, tuple):
-                h_src = self.feat_drop(feat[0])
-                h_dst = self.feat_drop(feat[1])
-                if not hasattr(self, "fc_src"):
-                    self.fc_src, self.fc_dst = self.fc, self.fc
-                feat_src, feat_dst = h_src, h_dst
-                feat_src = self.fc_src(h_src).view(-1, self._num_heads, self._out_feats)
-                feat_dst = self.fc_dst(h_dst).view(-1, self._num_heads, self._out_feats)
+        Args:
+            x: Node features [num_nodes, in_feats]
+            edge_index: Edge indices [2, num_edges]
+            edge_weight: Optional edge weights [num_edges]
+
+        Returns:
+            Output features [num_nodes, num_heads, out_feats]
+        """
+        h = self.feat_drop(x)
+
+        # Apply symmetric normalization if needed (before message passing)
+        if self._norm == "both":
+            # Compute out-degree normalization D^{-0.5}
+            row, col = edge_index
+            deg = torch.zeros(x.size(0), device=x.device)
+            deg.scatter_add_(0, row, torch.ones(row.size(0), device=x.device))
+            deg = deg.clamp(min=1)
+            deg_inv_sqrt = deg.pow(-0.5)
+            deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
+            h = h * deg_inv_sqrt.view(-1, 1)
+
+        # Apply GAT convolution
+        out = self.gat_conv(h, edge_index)
+
+        # Reshape to [num_nodes, num_heads, out_feats]
+        out = out.view(-1, self._num_heads, self._out_feats)
+
+        # Apply symmetric normalization if needed (after message passing)
+        if self._norm == "both":
+            # Compute in-degree normalization D^{0.5}
+            row, col = edge_index
+            deg = torch.zeros(x.size(0), device=x.device)
+            deg.scatter_add_(0, col, torch.ones(col.size(0), device=x.device))
+            deg = deg.clamp(min=1)
+            deg_sqrt = deg.pow(0.5)
+            # Reshape for broadcasting: [num_nodes, 1, 1]
+            out = out * deg_sqrt.view(-1, 1, 1)
+
+        # Add residual connection
+        if self.res_fc is not None:
+            if isinstance(self.res_fc, nn.Identity):
+                res = x.view(x.shape[0], self._num_heads, self._out_feats)
             else:
-                h_src = h_dst = self.feat_drop(feat)
-                feat_src, feat_dst = h_src, h_dst
-                feat_src = feat_dst = self.fc(h_src).view(-1, self._num_heads, self._out_feats)
-                if graph.is_block:
-                    feat_dst = feat_src[: graph.number_of_dst_nodes()]
+                res = self.res_fc(x).view(x.shape[0], self._num_heads, self._out_feats)
+            out = out + res
 
-            if self._norm == "both":
-                degs = graph.out_degrees().float().clamp(min=1)
-                norm = torch.pow(degs, -0.5)
-                shp = norm.shape + (1,) * (feat_src.dim() - 1)
-                norm = torch.reshape(norm, shp)
-                feat_src = feat_src * norm
+        # Apply activation
+        if self._activation is not None:
+            out = self._activation(out)
 
-            # NOTE: GAT paper uses "first concatenation then linear projection"
-            # to compute attention scores, while ours is "first projection then
-            # addition", the two approaches are mathematically equivalent:
-            # We decompose the weight vector a mentioned in the paper into
-            # [a_l || a_r], then
-            # a^T [Wh_i || Wh_j] = a_l Wh_i + a_r Wh_j
-            # Our implementation is much efficient because we do not need to
-            # save [Wh_i || Wh_j] on edges, which is not memory-efficient. Plus,
-            # addition could be optimized with DGL's built-in function u_add_v,
-            # which further speeds up computation and saves memory footprint.
-            el = (feat_src * self.attn_l).sum(dim=-1).unsqueeze(-1)
-            er = (feat_dst * self.attn_r).sum(dim=-1).unsqueeze(-1)
-            graph.srcdata.update({"ft": feat_src, "el": el})
-            graph.dstdata.update({"er": er})
-            # compute edge attention, el and er are a_l Wh_i and a_r Wh_j respectively.
-            graph.apply_edges(fn.u_add_v("el", "er", "e"))
-            e = self.leaky_relu(graph.edata.pop("e"))
-            # compute softmax
-            graph.edata["a"] = self.attn_drop(edge_softmax(graph, e))
-            # message passing
-            graph.update_all(fn.u_mul_e("ft", "a", "m"), fn.sum("m", "ft"))
-            rst = graph.dstdata["ft"]
-
-            if self._norm == "both":
-                degs = graph.in_degrees().float().clamp(min=1)
-                norm = torch.pow(degs, 0.5)
-                shp = norm.shape + (1,) * (feat_dst.dim() - 1)
-                norm = torch.reshape(norm, shp)
-                rst = rst * norm
-
-            # residual
-            if self.res_fc is not None:
-                resval = self.res_fc(h_dst).view(h_dst.shape[0], -1, self._out_feats)
-                rst = rst + resval
-            # activation
-            if self._activation is not None:
-                rst = self._activation(rst)
-            return rst
+        return out
 
 
 class GAT(nn.Module):
@@ -210,12 +153,10 @@ class GAT(nn.Module):
         self.convs = nn.ModuleList()
         self.linear = nn.ModuleList()
         self.bns = nn.ModuleList()
-        self.biases = nn.ModuleList()
 
         for i in range(n_layers):
             in_hidden = n_heads * n_hidden if i > 0 else in_feats
             out_hidden = n_hidden if i < n_layers - 1 else n_classes
-            # in_channels = n_heads if i > 0 else 1
             out_channels = n_heads
 
             self.convs.append(GATConv(in_hidden, out_hidden, num_heads=n_heads, attn_drop=attn_drop, norm=norm))
@@ -230,12 +171,23 @@ class GAT(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.activation = activation
 
-    def forward(self, graph, feat):
-        h = feat
+    def forward(self, x, edge_index, edge_weight=None):
+        """
+        Forward pass.
+
+        Args:
+            x: Node features [num_nodes, in_feats]
+            edge_index: Edge indices [2, num_edges]
+            edge_weight: Optional edge weights [num_edges]
+
+        Returns:
+            Class logits [num_nodes, n_classes]
+        """
+        h = x
         h = self.dropout0(h)
 
         for i in range(self.n_layers):
-            conv = self.convs[i](graph, h)
+            conv = self.convs[i](h, edge_index, edge_weight)
             linear = self.linear[i](h).view(conv.shape)
 
             h = conv + linear
